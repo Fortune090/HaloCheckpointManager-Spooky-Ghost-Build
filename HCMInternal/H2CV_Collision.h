@@ -33,8 +33,10 @@ namespace h2cv
 		std::vector<Surface> surfaces;
 		std::vector<Edge> edges;
 		std::vector<Vec3> verts;
-		uintptr_t liveSurfaces = 0; // live surfaces array (for breakable "invalid" flag re-reads)
+		std::vector<float> planes;   // planes @+0x08 (stride 0x10): {i, j, k, d}; surface.plane bit 15 = flipped
 		bool parse(uintptr_t collbsp, const h2::TagPools& p);
+		// front-facing unit normal of a surface (its plane, negated when the plane index is flagged); false if malformed
+		bool normal(uint32_t surface, Vec3& out) const;
 		// ordered polygon outline of a surface (Halo edge-ring walk); false if malformed
 		bool polygon(uint32_t surface, std::vector<Vec3>& out) const;
 	};
@@ -57,6 +59,7 @@ namespace h2cv
 		const std::vector<Tri>& killTriggerFills() const { return mKillTris; }    // scenario kill-trigger volume faces
 
 		bool valid() const { return mSbsp != 0; }
+		uintptr_t sbspId() const { return mSbsp; }   // changes on every BSP (re)load
 		const CollBsp& worldBsp() const { return mWorld; }
 
 		// polygon outline for a Havok BSP collection child (category decoded by the caller)
@@ -65,6 +68,16 @@ namespace h2cv
 		size_t igInstanceCount() const { return mIgInstances.size(); }
 
 		size_t edgeCountTotal() const;
+
+		// "desyncable creases": two collision surfaces sharing an edge whose fronts face each other at less than 90
+		// degrees (concave AND nA.nB < 0). Ghosting model: a head-on bump into A rewinds along -nA, which over-credits
+		// the TIM of any nearby polygon B with nB.(-nA) > 0, i.e. nA.nB < 0 - a flat floor meeting a vertical wall
+		// (nA.nB = 0) can't be charged, a floor sloping down into the wall can. sharp = -nA.nB (0..1).
+		struct Crease { Line edge; float sharp; };
+		const std::vector<Crease>& creases() const { return mCreases; }
+		const std::vector<Line>& creaseFaces() const { return mCreaseFaces; }   // outlines of both faces of each crease
+		int planeOrientationAgree() const { return mPlaneAgree; }               // diagnostics: winding vs signed plane
+		int planeOrientationDisagree() const { return mPlaneDisagree; }
 
 	private:
 		void rebuildStatic(uintptr_t sbsp);
@@ -77,16 +90,34 @@ namespace h2cv
 		std::vector<CollBsp> mIgDefs;
 		std::vector<IgInstance> mIgInstances;
 
-		struct BreakableEdge { Line l; uint16_t surface; };
+		// edge bordering a breakable collision surface; left/right are surface indices (0xFFFF = none)
+		struct BreakableEdge { Line l; uint16_t left, right; };
 		std::vector<BreakableEdge> mBreakable;
+
+		std::vector<Crease> mCreases;
+		std::vector<Line> mCreaseFaces;
+		int mPlaneAgree = 0, mPlaneDisagree = 0;
+		void findCreases(const CollBsp& bsp, const float* m);   // m = IG placement, nullptr for the world bsp
 
 		std::vector<Line> mLines[kCatCount];
 		std::vector<Tri> mStaticTris, mObjectTris, mBarrierTris, mKillTris;
 		void buildKillTriggers();
 
-		// object collision: coll tag data address -> node-local collision bsps
+		// object collision, parsed from the engine's own walk (sub_180734FB0):
+		//   coll tag: regions {count @+0x1C, offset @+0x20} stride 12 -> permutations {count @+4, offset @+8} stride 20
+		//   -> bsps {count @+4, offset @+8} stride 0x44 {node_index u16 @0, collision_bsp @+4}
 		struct ObjBsp { uint16_t node; std::vector<Line> lines; std::vector<Tri> tris; };
-		std::unordered_map<uintptr_t, std::vector<ObjBsp>> mCollCache;
+		struct ObjPerm { std::vector<ObjBsp> bsps; };
+		struct ObjRegion { std::vector<ObjPerm> perms; };
+		struct ObjColl { std::vector<ObjRegion> regions; };
+		std::unordered_map<uintptr_t, ObjColl> mCollCache;     // coll tag data address -> geometry
+		// model (hlmt) regions {count @+0x70, offset @+0x74} stride 16: collision_region_index i8 @+4, permutations
+		// {count @+8, offset @+0xC} stride 8, collision_permutation_index i8 @+5 (sub_180793C40 / sub_180793760)
+		struct ModelRegion { int8_t collRegion; std::vector<int8_t> collPerm; };
+		struct ModelMap { std::vector<ModelRegion> regions; bool anyMapped = false; };
+		std::unordered_map<uintptr_t, ModelMap> mModelCache;   // hlmt tag data address -> region mapping
+		const ObjColl* loadColl(uintptr_t coll, const h2::TagPools& p);
+		const ModelMap* loadModelMap(uintptr_t hlmt, const h2::TagPools& p);
 		uint32_t mFrame = 0;
 	};
 }

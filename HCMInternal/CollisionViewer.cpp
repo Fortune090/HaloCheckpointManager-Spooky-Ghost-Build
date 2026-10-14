@@ -87,6 +87,13 @@ private:
 	}
 
 	// ---- HCM settings -> viewer (every frame; the GUI writes on this same render thread) ----
+	// colour picker (0..1 floats) -> the viewer's rgba() packing: r | g<<8 | b<<16 | a<<24
+	static uint32_t packColour(const SimpleMath::Vector4& c)
+	{
+		auto ch = [](float f) { return (uint32_t)(std::clamp(f, 0.f, 1.f) * 255.f + 0.5f); };
+		return ch(c.x) | (ch(c.y) << 8) | (ch(c.z) << 16) | (255u << 24);
+	}
+
 	void syncSettings(SettingsStateAndEvents& s)
 	{
 		auto& v = mViewer.settings;
@@ -106,6 +113,22 @@ private:
 		v.timLabels = s.collisionViewerTimLabels->GetValue();
 		v.pills = s.collisionViewerPills->GetValue();
 		v.hud = s.collisionViewerInfoPanel->GetValue();
+		v.ghostLog = s.collisionViewerGhostLog->GetValue();
+		v.ghostVehicles = s.collisionViewerGhostVehicles->GetValue();
+		v.creases = s.collisionViewerCreases->GetValue();
+		v.creaseFaces = s.collisionViewerCreaseFaces->GetValue();
+		v.ghostShowReal = s.collisionViewerGhostShowReal->GetValue();
+		v.ghostColNormal = packColour(s.collisionViewerGhostColNormal->GetValue());
+		v.ghostColDesync = packColour(s.collisionViewerGhostColDesync->GetValue());
+		v.ghostColBelieved = packColour(s.collisionViewerGhostColBelieved->GetValue());
+		v.ghost = s.collisionViewerGhost->GetValue();
+		v.ghostBelieved = s.collisionViewerGhostBelieved->GetValue();
+		v.ghostTrail = s.collisionViewerGhostTrail->GetValue();
+		v.ghostRewind = s.collisionViewerGhostRewind->GetValue();
+		v.ghostPrev = s.collisionViewerGhostPrev->GetValue();
+		v.ghostHalo = s.collisionViewerGhostHalo->GetValue();
+		v.ghostEdges = s.collisionViewerGhostEdges->GetValue();
+		v.ghostEdgesSuspectOnly = s.collisionViewerGhostEdgesSuspect->GetValue();
 		v.lineWidth = s.collisionViewerLineWidth->GetValue();
 		v.pull = s.collisionViewerDepthPull->GetValue();
 		v.nearRadius = s.collisionViewerRadius->GetValue();

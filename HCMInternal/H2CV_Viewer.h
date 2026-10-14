@@ -2,6 +2,7 @@
 #include <d3d11.h>
 #include <dxgi.h>
 #include <atomic>
+#include <deque>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -33,12 +34,50 @@ namespace h2cv
 		std::atomic_bool pills{ true };           // Havok capsules of bipeds
 		std::atomic_bool bipedOccluders{ true };  // capsules of OTHER bipeds/vehicles occlude lines
 		std::atomic_bool hud{ true };
+		std::atomic_bool creases{ false };             // static acute-crease PREDICTION (CollisionWorld::Crease) - disproved as a rule (90 deg corners ghost too); kept as a visual aid
+		std::atomic_bool creaseFaces{ true };          // also outline both faces of each crease
+		// ghost desync LOGGER: while Ghost debug runs, writes backstep / rewind / over-credit episodes (with the polygon,
+		// direction, velocities and the surfaces being touched) to GhostDesyncLog_<date>.jsonl next to the module
+		std::atomic_bool ghostLog{ false };
+		// ---- ghosting desync debug view (Home / End, see dllmain.cpp) ----
+		std::atomic_bool ghost{ false };                // master toggle [Home]
+		std::atomic_bool ghostPrev{ true };             // (b) Havok step-start pose (motion PREV)
+		std::atomic_bool ghostHalo{ true };             // (c) Halo's own object position
+		std::atomic_bool ghostTrail{ true };            // (d) last N ticks of Havok poses            [End]
+		std::atomic_bool ghostRewind{ true };           // (e/g) backstep rewind target + pre-rewind pose
+		std::atomic_bool ghostBelieved{ true };         // (f) poses the over-credited TIMs believe     [Shift+Home]
+		std::atomic_bool ghostEdges{ true };            // lime/red edges of skipped / over-credited polygons [Shift+End]
+		std::atomic_bool ghostEdgesSuspectOnly{ false };// false = every skipped child (TIM>0), true = only stale / over-credited ones
+		std::atomic_bool ghostStrictSkip{ false };      // true = ANY skipped child turns the capsule lime (very common on floors)
+		std::atomic_int ghostTrailLen{ 8 };             // ticks
+		std::atomic_int ghostHold{ 8 };                 // ticks a backstep keeps the capsule lime / the rewind target visible
+		std::atomic_int ghostBelievedMax{ 6 };          // max believed-pose capsules per player
+		std::atomic<float> ghostPrevMinDelta{ 0.001f }; // wu: draw (b) only when it differs from the current pose by more than this
+		std::atomic<float> ghostHaloMinDelta{ 0.0005f };// wu: draw (c) only when Halo's position differs from Havok's by more than this
+		std::atomic<float> ghostOverMin{ 0.005f };      // wu of TIM over-credit that counts as "suspect"
+		std::atomic_bool ghostShowReal{ true };         // draw (a), the capsule where Havok really is (off = only the desync poses)
+		std::atomic_bool ghostVehicles{ true };         // seated in a vehicle (any seat): show the vehicle's Havok body instead of the biped's
+		// capsule colours, packed like rgba() (r | g<<8 | b<<16 | a<<24)
+		std::atomic<uint32_t> ghostColNormal{ 0xFFB469FFu };   // (a) no backstep / nothing suspect  (pink 255,105,180)
+		std::atomic<uint32_t> ghostColDesync{ 0xFF00FFAAu };   // (a) backstep / suspect child          (lime 170,255,0)
+		std::atomic<uint32_t> ghostColBelieved{ 0xFF00FFAAu }; // (f) believed poses                   (lime)
 	};
 
 	class Viewer
 	{
 	public:
 		Settings settings;
+
+		// ---- ghost desync LOGGER (render thread only; JSON lines next to the module, see logEvent) ----
+		struct LogKey { uint64_t k; bool operator==(const LogKey& o) const { return k == o.k; } };
+		struct LogState { uint32_t startTick = 0, lastFrame = 0; float peakOver = 0.f; std::string startRec; };
+		std::vector<std::pair<uint64_t, LogState>> mLogActive;   // over-credit episodes in progress
+		FILE* mLogFile = nullptr;
+		std::string mLogPath;
+		uint32_t mLogFrame = 0, mLogLines = 0;
+		bool logEnsureOpen();
+		void logClose();
+		void logEvent(const std::string& json);
 
 		// called from HCM's ForegroundDirectXRenderEvent: inside Present, ImGui frame open, HCM's UI not drawn yet
 		void onRender(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t w, uint32_t h);
@@ -56,6 +95,7 @@ namespace h2cv
 		void drawCollision(const h2::Vec3& camPos, bool depthTest);
 		void drawTim();
 		void drawPills();
+		void drawGhost();
 		void drawHud(const h2::Camera& cam);
 
 		ID3D11Device* mDev = nullptr;
@@ -68,6 +108,28 @@ namespace h2cv
 		GameDepthInput mGame;
 		std::vector<LineVertex> mScratch;
 		uint64_t mLastTime = 0;
+
+		// ghost debug state, one slot per local user 0..3
+		struct GhostSample { uint32_t tick = 0; h2::Vec3 cur{}, prev{}; int32_t S = 0; h2::Xf pose; };
+		struct GhostPlayer
+		{
+			uintptr_t obj = 0; uint32_t lastTick = 0; bool have = false;
+			std::deque<GhostSample> trail;
+			uint32_t lastBackstepTick = 0; bool everBackstep = false; int32_t prevS = 0;
+			bool haveRewind = false; uint32_t rewindTick = 0; h2::Vec3 rewindFrom{}, rewindTo{}; float rewindDist = 0, tStar = 0;
+		};
+		struct GhostInfo
+		{
+			bool valid = false; int user = 0; std::string note;
+			std::string subject = "biped", detail; bool vehicle = false; int nPrims = 0, nWelders = 0;
+			bool pairFound = false, welder = false; int32_t S = 0;
+			int nChildren = 0, nSkipped = 0, nSuspect = 0; float maxOver = 0;
+			float dOrigin = 0, dCom = 0, comOff = 0; bool haloRefCom = false; float prevDelta = 0;
+			float rewindDist = 0, tStar = 0; int rewindAge = -1;
+			bool lime = false, hold = false; int nBelieved = 0;
+		};
+		GhostPlayer mGP[4];
+		GhostInfo mGI[4];
 
 		// HUD stats
 		struct TimRow { uint32_t key; int cat; uint32_t inst, surf; float tim; int manifold; uint8_t kind; float trueDist; };

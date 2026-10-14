@@ -425,6 +425,7 @@ IF EXIST "C:\Program Files\LockHunter\LockHunter.exe"  (
     <ClInclude Include="UncapClusterLimit.h" />
     <ClInclude Include="UncapRenderSections.h" />
     <ClInclude Include="CollisionViewer.h" />
+    <ClInclude Include="H2ChaseCamera.h" />
     <ClInclude Include="H2CV_Log.h" />
     <ClInclude Include="H2CV_Mem.h" />
     <ClInclude Include="H2CV_Halo2.h" />
@@ -839,6 +840,7 @@ IF EXIST "C:\Program Files\LockHunter\LockHunter.exe"  (
     <ClCompile Include="UncapClusterLimit.cpp" />
     <ClCompile Include="UncapRenderSections.cpp" />
     <ClCompile Include="CollisionViewer.cpp" />
+    <ClCompile Include="H2ChaseCamera.cpp" />
     <ClCompile Include="H2CV_Halo2.cpp" />
     <ClCompile Include="H2CV_Collision.cpp" />
     <ClCompile Include="H2CV_Renderer.cpp" />

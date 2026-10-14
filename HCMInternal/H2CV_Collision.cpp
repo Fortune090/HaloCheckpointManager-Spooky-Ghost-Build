@@ -15,10 +15,29 @@ namespace h2cv
 		constexpr uintptr_t kInstancesBlock = 0x140, kDefinitionsBlock = 0x138; // sbsp IG blocks
 		constexpr size_t kInstanceStride = 0x58, kDefinitionStride = 0xC8;
 		constexpr uintptr_t kInstDefIndexOff = 0x34, kDefCollisionOff = 0xB4, kMidCollbspPtrOff = 0x18;
-		// object -> def tag (+0x00 u16 index) -> hlmt (+0x38) -> coll (+0x0C) -> collision_model_bsps (+0x48, stride 0x44)
-		constexpr uintptr_t kDefModelRefOff = 0x38, kModelCollRefOff = 0x0C, kCollBspBlockOff = 0x48;
-		constexpr size_t kCollModelBspStride = 0x44;
+		// object -> def tag (+0x00 u16 index) -> hlmt (+0x38) -> coll (+0x0C); coll walked exactly like the engine's
+		// sub_180734FB0: regions @+0x1C (stride 12) -> permutations @region+4 (stride 20) -> bsps @perm+4 (stride 0x44)
+		constexpr uintptr_t kDefModelRefOff = 0x38, kModelCollRefOff = 0x0C;
+		constexpr uintptr_t kCollRegionsBlock = 0x1C, kRegionPermsBlock = 4, kPermBspsBlock = 4;
+		constexpr size_t kCollRegionStride = 12, kCollPermStride = 20, kCollModelBspStride = 0x44;
+		// hlmt region table (sub_180793C40): regions {count @+0x70, offset @+0x74} stride 16, perms stride 8
+		constexpr uintptr_t kModelRegionsBlock = 0x70;
+		constexpr size_t kModelRegionStride = 16, kModelPermStride = 8;
+		constexpr uint8_t kHdrBeingDeleted = 0x10;   // object header entry +2
 		constexpr uint8_t kInvisible = 0x02, kBreakable = 0x08, kInvalid = 0x10;
+
+		// real_matrix4x3 sanity (scale, forward, left, up, position): finite, positive scale, unit axes, bounded position
+		bool sanePlacement(const float* m)
+		{
+			for (int i = 0; i < 13; ++i) if (!std::isfinite(m[i])) return false;
+			if (!(m[0] > 1e-4f && m[0] < 1e4f)) return false;
+			for (int a = 1; a <= 7; a += 3)   // forward, left, up
+			{
+				const float l2 = m[a] * m[a] + m[a + 1] * m[a + 1] + m[a + 2] * m[a + 2];
+				if (l2 < 0.8f || l2 > 1.25f) return false;
+			}
+			return std::fabs(m[10]) < 1e5f && std::fabs(m[11]) < 1e5f && std::fabs(m[12]) < 1e5f;
+		}
 	}
 
 	const char* catName(Cat c)
@@ -49,7 +68,17 @@ namespace h2cv
 
 	bool CollBsp::parse(uintptr_t collbsp, const h2::TagPools& p)
 	{
-		surfaces.clear(); edges.clear(); verts.clear(); liveSurfaces = 0;
+		surfaces.clear(); edges.clear(); verts.clear(); planes.clear();
+		// planes block {count, offset} @+0x08 (collision_bsp: bsp3d nodes +0, planes +8, leaves +0x10, bsp2d refs +0x18,
+		// bsp2d nodes +0x20, surfaces +0x28 ...); optional - only the crease highlight uses it
+		{
+			uintptr_t pF = 0; uint32_t pN = 0;
+			if (h2::resolveBlock(collbsp + 0x08, p, pF, pN) && pN > 0 && pN < 200000)
+			{
+				planes.resize((size_t)pN * 4);
+				if (!copy(planes.data(), pF, planes.size() * 4)) planes.clear();
+			}
+		}
 		uintptr_t sF = 0, eF = 0, vF = 0; uint32_t sN = 0, eN = 0, vN = 0;
 		if (!h2::resolveBlock(collbsp + kSurfacesBlock, p, sF, sN)) return false;
 		if (!h2::resolveBlock(collbsp + kEdgesBlock, p, eF, eN)) return false;
@@ -62,7 +91,6 @@ namespace h2cv
 		if (!copy(vraw.data(), vF, vraw.size() * 4)) return false;
 		verts.resize(vN);
 		for (uint32_t i = 0; i < vN; ++i) verts[i] = { vraw[i * 4 + 0], vraw[i * 4 + 1], vraw[i * 4 + 2] };
-		liveSurfaces = sF;
 		return true;
 	}
 
@@ -86,6 +114,78 @@ namespace h2cv
 			if (e == start) return out.size() >= 3;
 		}
 		return false;
+	}
+
+	bool CollBsp::normal(uint32_t s, Vec3& out) const
+	{
+		if (s >= surfaces.size()) return false;
+		const uint32_t pi = surfaces[s].plane & 0x7FFF;
+		if ((size_t)pi * 4 + 3 >= planes.size()) return false;
+		Vec3 n{ planes[pi * 4 + 0], planes[pi * 4 + 1], planes[pi * 4 + 2] };
+		const float l = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+		if (!(l > 0.5f && l < 1.5f)) return false;
+		n = { n.x / l, n.y / l, n.z / l };
+		if (surfaces[s].plane & 0x8000) n = { -n.x, -n.y, -n.z };
+		out = n;
+		return true;
+	}
+
+	void CollisionWorld::findCreases(const CollBsp& bsp, const float* m)
+	{
+		const size_t sN = bsp.surfaces.size(), vN = bsp.verts.size();
+		if (!sN || bsp.planes.empty()) return;
+		auto X = [&](const Vec3& v) { return m ? igTransform(m, v) : v; };
+		auto dot = [](const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+		auto sub = [](const Vec3& a, const Vec3& b) { return Vec3{ a.x - b.x, a.y - b.y, a.z - b.z }; };
+		// world-space normal + centroid per surface, computed lazily (only surfaces on candidate edges)
+		struct SInfo { bool done = false, ok = false; Vec3 n{}, c{}; };
+		std::vector<SInfo> si(sN);
+		std::vector<Vec3> poly;
+		auto info = [&](uint32_t s) -> const SInfo&
+		{
+			SInfo& r = si[s];
+			if (r.done) return r;
+			r.done = true;
+			if (bsp.surfaces[s].flags & 0x10) return r;                      // invalid
+			Vec3 n;
+			if (!bsp.normal(s, n) || !bsp.polygon(s, poly)) return r;
+			// winding cross-check (diagnostics only): Newell normal vs the signed plane normal
+			Vec3 nw{};
+			for (size_t i = 0; i < poly.size(); ++i)
+			{
+				const Vec3& a = poly[i]; const Vec3& b = poly[(i + 1) % poly.size()];
+				nw.x += (a.y - b.y) * (a.z + b.z); nw.y += (a.z - b.z) * (a.x + b.x); nw.z += (a.x - b.x) * (a.y + b.y);
+			}
+			if (dot(nw, n) >= 0) ++mPlaneAgree; else ++mPlaneDisagree;
+			Vec3 c{};
+			for (auto& v : poly) { const Vec3 w = X(v); c.x += w.x; c.y += w.y; c.z += w.z; }
+			const float k = 1.f / (float)poly.size();
+			r.c = { c.x * k, c.y * k, c.z * k };
+			if (m) { const Vec3 o = X({ 0, 0, 0 }); Vec3 t = sub(X(n), o); const float l = std::sqrt(dot(t, t)); if (!(l > 1e-6f)) return r; n = { t.x / l, t.y / l, t.z / l }; }
+			r.n = n; r.ok = true;
+			return r;
+		};
+		std::vector<uint8_t> faceDone(sN, 0);
+		auto addFace = [&](uint32_t s)
+		{
+			if (faceDone[s]) return;
+			faceDone[s] = 1;
+			if (!bsp.polygon(s, poly)) return;
+			for (size_t i = 0; i < poly.size(); ++i) mCreaseFaces.push_back({ X(poly[i]), X(poly[(i + 1) % poly.size()]) });
+		};
+		for (const auto& e : bsp.edges)
+		{
+			if (e.left >= sN || e.right >= sN || e.left == e.right || e.v0 >= vN || e.v1 >= vN) continue;
+			const SInfo& A = info(e.left);
+			const SInfo& B = info(e.right);
+			if (!A.ok || !B.ok) continue;
+			const float d = dot(A.n, B.n);
+			if (d >= -0.02f) continue;                                         // 90 degrees or wider: can't be charged
+			// concave: each face lies in front of the other's plane (a convex ridge has them behind)
+			if (dot(A.n, sub(B.c, A.c)) <= 1e-3f || dot(B.n, sub(A.c, B.c)) <= 1e-3f) continue;
+			mCreases.push_back({ { X(bsp.verts[e.v0]), X(bsp.verts[e.v1]) }, std::min(1.f, -d) });
+			addFace(e.left); addFace(e.right);
+		}
 	}
 
 	bool CollisionWorld::igPolygon(uint32_t instance, uint32_t surface, std::vector<Vec3>& out) const
@@ -118,14 +218,15 @@ namespace h2cv
 			if (e.v0 >= vN || e.v1 >= vN || e.v0 == e.v1) continue;
 			const int fL = flagsOf(e.left), fR = flagsOf(e.right);
 			const bool brL = fL >= 0 && (fL & kBreakable), brR = fR >= 0 && (fR & kBreakable);
-			const bool skipL = e.left != 0xFFFF && (fL < 0 || (fL & (kBreakable | kInvalid)));
-			const bool skipR = e.right != 0xFFFF && (fR < 0 || (fR & (kBreakable | kInvalid)));
-			if (withBreakable && (brL || brR))
+			const bool skipL = e.left != 0xFFFF && (fL < 0 || (fL & kInvalid));
+			const bool skipR = e.right != 0xFFFF && (fR < 0 || (fR & kInvalid));
+			if (skipL || skipR) continue;
+			if (brL || brR)
 			{
-				mBreakable.push_back({ { X(bsp.verts[e.v0]), X(bsp.verts[e.v1]) }, brL ? e.left : e.right });
+				// breakable edges never enter the static lists; update() draws them while a side is still solid
+				if (withBreakable) mBreakable.push_back({ { X(bsp.verts[e.v0]), X(bsp.verts[e.v1]) }, e.left, e.right });
 				continue;
 			}
-			if (skipL || skipR) continue;
 			const bool invis = (fL >= 0 && (fL & kInvisible)) || (fR >= 0 && (fR & kInvisible));
 			mLines[(int)(invis ? invisible : normal)].push_back({ X(bsp.verts[e.v0]), X(bsp.verts[e.v1]) });
 		}
@@ -148,14 +249,14 @@ namespace h2cv
 	void CollisionWorld::rebuildStatic(uintptr_t sbsp)
 	{
 		for (int c = 0; c <= (int)Cat::InstancedInvisible; ++c) mLines[c].clear();
-		mBreakable.clear(); mStaticTris.clear(); mBarrierTris.clear(); mIgDefs.clear(); mIgInstances.clear(); mWorld = {};
+		mBreakable.clear(); mStaticTris.clear(); mBarrierTris.clear(); mIgDefs.clear(); mIgInstances.clear(); mWorld = {}; mCreases.clear(); mCreaseFaces.clear(); mPlaneAgree = mPlaneDisagree = 0;
 		h2::TagPools p;
 		if (!h2::tagPools(p) || !sbsp) return;
 
 		// world collision bsp
 		uintptr_t first = 0; uint32_t count = 0;
 		if (h2::resolveBlock(sbsp + kCollisionBspBlock, p, first, count) && count >= 1 && mWorld.parse(first, p))
-			classify(mWorld, nullptr, Cat::Bsp, Cat::BspInvisible, true, &mStaticTris, &mBarrierTris);
+			{ classify(mWorld, nullptr, Cat::Bsp, Cat::BspInvisible, true, &mStaticTris, &mBarrierTris); findCreases(mWorld, nullptr); }
 
 		// instanced geometry
 		uintptr_t iF = 0, dF = 0; uint32_t iN = 0, dN = 0;
@@ -185,10 +286,11 @@ namespace h2cv
 				}
 				mIgInstances.push_back(in);
 				if (in.def >= 0)
-					classify(mIgDefs[in.def], in.m, Cat::Instanced, Cat::InstancedInvisible, false, &mStaticTris, &mBarrierTris);
+					{ classify(mIgDefs[in.def], in.m, Cat::Instanced, Cat::InstancedInvisible, false, &mStaticTris, &mBarrierTris); findCreases(mIgDefs[in.def], in.m); }
 			}
 		}
 		buildKillTriggers();
+		LOGF("desyncable creases: %zu (faces %zu lines)  plane/winding agree %d disagree %d", mCreases.size(), mCreaseFaces.size(), mPlaneAgree, mPlaneDisagree);
 		LOGF("collision rebuilt: sbsp 0x%llX  bsp %zu  invis %zu  breakable %zu  IG %zu (+%zu invis) from %zu instances  occluder tris %zu",
 			(unsigned long long)sbsp, mLines[(int)Cat::Bsp].size(), mLines[(int)Cat::BspInvisible].size(), mBreakable.size(),
 			mLines[(int)Cat::Instanced].size(), mLines[(int)Cat::InstancedInvisible].size(), mIgInstances.size(), mStaticTris.size());
@@ -229,6 +331,71 @@ namespace h2cv
 		}
 	}
 
+	// Parse the coll tag exactly the way the engine walks it (sub_180734FB0, which builds the Havok shape of every
+	// permutation bsp at map load): regions -> permutations -> bsps. Cached per tag; geometry is node-local.
+	const CollisionWorld::ObjColl* CollisionWorld::loadColl(uintptr_t coll, const h2::TagPools& p)
+	{
+		auto it = mCollCache.find(coll);
+		if (it != mCollCache.end()) return &it->second;
+		ObjColl oc;
+		uintptr_t rF = 0; uint32_t rN = 0;
+		if (!h2::resolveBlock(coll + kCollRegionsBlock, p, rF, rN) || rN > 64) return nullptr;   // not cached: retry
+		oc.regions.resize(rN);
+		for (uint32_t r = 0; r < rN; ++r)
+		{
+			uintptr_t pF = 0; uint32_t pN = 0;
+			if (!h2::resolveBlock(rF + (uintptr_t)r * kCollRegionStride + kRegionPermsBlock, p, pF, pN) || pN > 256) continue;
+			oc.regions[r].perms.resize(pN);
+			for (uint32_t pi = 0; pi < pN; ++pi)
+			{
+				uintptr_t bF = 0; uint32_t bN = 0;
+				if (!h2::resolveBlock(pF + (uintptr_t)pi * kCollPermStride + kPermBspsBlock, p, bF, bN) || bN > 64) continue;
+				for (uint32_t k = 0; k < bN; ++k)
+				{
+					const uintptr_t el = bF + (uintptr_t)k * kCollModelBspStride;
+					CollBsp cb;
+					if (!cb.parse(el + 4, p)) continue;
+					ObjBsp ob; ob.node = u16(el);
+					for (const auto& e : cb.edges)
+						if (e.v0 < cb.verts.size() && e.v1 < cb.verts.size() && e.v0 != e.v1)
+							ob.lines.push_back({ cb.verts[e.v0], cb.verts[e.v1] });
+					std::vector<Vec3> poly;
+					for (uint32_t s = 0; s < cb.surfaces.size(); ++s)
+					{
+						if (cb.surfaces[s].flags & kInvisible) continue;
+						if (!cb.polygon(s, poly)) continue;
+						for (size_t i = 1; i + 1 < poly.size(); ++i) ob.tris.push_back({ poly[0], poly[i], poly[i + 1] });
+					}
+					if (!ob.lines.empty()) oc.regions[r].perms[pi].bsps.push_back(std::move(ob));
+				}
+			}
+		}
+		return &mCollCache.emplace(coll, std::move(oc)).first->second;
+	}
+
+	// hlmt "regions" block -> which collision region / permutation each model region / permutation selects.
+	// Engine: sub_180793C40 (key generation) and sub_180793760 (key -> shape) read exactly these bytes.
+	const CollisionWorld::ModelMap* CollisionWorld::loadModelMap(uintptr_t hlmt, const h2::TagPools& p)
+	{
+		auto it = mModelCache.find(hlmt);
+		if (it != mModelCache.end()) return &it->second;
+		ModelMap mm;
+		uintptr_t rF = 0; uint32_t rN = 0;
+		if (!h2::resolveBlock(hlmt + kModelRegionsBlock, p, rF, rN) || rN > 64) return nullptr;
+		mm.regions.resize(rN);
+		for (uint32_t r = 0; r < rN; ++r)
+		{
+			const uintptr_t re = rF + (uintptr_t)r * kModelRegionStride;
+			mm.regions[r].collRegion = (int8_t)u8(re + 4, 0xFF);
+			if (mm.regions[r].collRegion >= 0) mm.anyMapped = true;
+			uintptr_t pF = 0; uint32_t pN = 0;
+			if (!h2::resolveBlock(re + 8, p, pF, pN) || pN > 256) continue;
+			mm.regions[r].collPerm.resize(pN);
+			for (uint32_t k = 0; k < pN; ++k) mm.regions[r].collPerm[k] = (int8_t)u8(pF + (uintptr_t)k * kModelPermStride + 5, 0xFF);
+		}
+		return &mModelCache.emplace(hlmt, std::move(mm)).first->second;
+	}
+
 	void CollisionWorld::gatherObjects()
 	{
 		for (Cat c : { Cat::Scenery, Cat::Crate, Cat::Machine }) mLines[(int)c].clear();
@@ -245,6 +412,10 @@ namespace h2cv
 			else if (o.type == h2::Machine) cat = Cat::Machine;
 			else continue;
 
+			// lifecycle, as the engine's own object walkers test it (sub_1808D70C0 / sub_1808D7130):
+			// header +2 bit 0x10 (being deleted) or object flags bit 0 (hidden) => not a live object
+			if ((o.hdrFlags & kHdrBeingDeleted) || h2::objectHidden(o.obj)) continue;
+
 			const uint16_t defIdx = u16(o.obj + 0x00);
 			if (defIdx == 0xFFFF) continue;
 			const uintptr_t defTag = h2::tagData(defIdx, p);
@@ -256,48 +427,70 @@ namespace h2cv
 			const uintptr_t coll = collIdx == 0xFFFF ? 0 : h2::tagData(collIdx, p);
 			if (!okp(coll)) continue;
 
-			auto it = mCollCache.find(coll);
-			if (it == mCollCache.end())
-			{
-				std::vector<ObjBsp> bsps;
-				uintptr_t bF = 0; uint32_t bN = 0;
-				if (h2::resolveBlock(coll + kCollBspBlockOff, p, bF, bN) && bN > 0 && bN <= 256)
-					for (uint32_t k = 0; k < bN; ++k)
-					{
-						const uintptr_t el = bF + (uintptr_t)k * kCollModelBspStride;
-						CollBsp cb;
-						if (!cb.parse(el + 4, p)) continue;
-						ObjBsp ob; ob.node = u16(el);
-						for (const auto& e : cb.edges)
-							if (e.v0 < cb.verts.size() && e.v1 < cb.verts.size() && e.v0 != e.v1)
-								ob.lines.push_back({ cb.verts[e.v0], cb.verts[e.v1] });
-						std::vector<Vec3> poly;
-						for (uint32_t s = 0; s < cb.surfaces.size(); ++s)
-						{
-							if (cb.surfaces[s].flags & kInvisible) continue;
-							if (!cb.polygon(s, poly)) continue;
-							for (size_t i = 1; i + 1 < poly.size(); ++i) ob.tris.push_back({ poly[0], poly[i], poly[i + 1] });
-						}
-						if (!ob.lines.empty()) bsps.push_back(std::move(ob));
-					}
-				it = mCollCache.emplace(coll, std::move(bsps)).first;
-			}
-			if (it->second.empty()) continue;
+			const ObjColl* oc = loadColl(coll, p);
+			if (!oc || oc->regions.empty()) continue;
+			const ModelMap* mm = loadModelMap(model, p);
 
-			// object world transform from its location sub-struct: pos +0x64, forward +0x70, up +0x7C
-			float loc[9];
-			if (!copy(loc, o.obj + 0x64, sizeof(loc))) continue;
+			// Which (collision region, permutation) pairs are live NOW. The engine accepts a collision bsp of key
+			// (model region r, model permutation q) only while the object's runtime region state byte[r] == q
+			// (sub_180794590 key types 3/4: `*(char*)((key & 0x1F) + state) != key >> 5 => rejected`).
+			// A destroyed destructible switches those bytes, so its old geometry stops being drawn.
+			int8_t state[64];
+			const int ns = h2::objectRegionState(o.obj, state, 64);
+			struct Sel { uint32_t r, p; };
+			Sel sel[64]; int nsel = 0;
+			auto add = [&](int cr, int cp)
+			{
+				if (cr < 0 || cr >= (int)oc->regions.size()) return;
+				if (cp < 0 || cp >= (int)oc->regions[cr].perms.size()) return;
+				for (int i = 0; i < nsel; ++i) if (sel[i].r == (uint32_t)cr && sel[i].p == (uint32_t)cp) return;   // several model regions can share one
+				if (nsel < 64) sel[nsel++] = { (uint32_t)cr, (uint32_t)cp };
+			};
+			if (mm && mm->anyMapped)
+			{
+				for (size_t r = 0; r < mm->regions.size(); ++r)
+				{
+					const ModelRegion& mr = mm->regions[r];
+					if (mr.collRegion < 0) continue;
+					const int mp = (int)r < ns ? (int)state[r] : 0;    // no state block: placement default permutation 0
+					if (mp < 0 || mp >= (int)mr.collPerm.size()) continue;
+					add(mr.collRegion, mr.collPerm[mp]);
+				}
+			}
+			else
+			{
+				// the model carries no collision-region mapping at all (the engine would never reach these bsps through
+				// the hlmt): still show the coll geometry, one permutation per region (xlive's behaviour)
+				for (size_t cr = 0; cr < oc->regions.size(); ++cr)
+				{
+					const int s = (int)cr < ns ? (int)state[cr] : 0;
+					if (s < 0) continue;
+					add((int)cr, s < (int)oc->regions[cr].perms.size() ? s : 0);
+				}
+			}
+			if (!nsel) continue;
+
+			// root transform (fallback only): pos +0x64, forward +0x70, up +0x7C
+			float loc[9] = {};
+			const bool haveLoc = copy(loc, o.obj + 0x64, sizeof(loc));
 			const Vec3 pos{ loc[0], loc[1], loc[2] }, fwd{ loc[3], loc[4], loc[5] }, up{ loc[6], loc[7], loc[8] };
 			const float lf = fwd.x * fwd.x + fwd.y * fwd.y + fwd.z * fwd.z, lu = up.x * up.x + up.y * up.y + up.z * up.z;
-			if (lf < 0.8f || lf > 1.25f || lu < 0.8f || lu > 1.25f || !std::isfinite(pos.x) || std::fabs(pos.x) > 1e5f) continue;
+			const bool rootOk = haveLoc && lf >= 0.8f && lf <= 1.25f && lu >= 0.8f && lu <= 1.25f && std::isfinite(pos.x) && std::fabs(pos.x) <= 1e5f;
 			const Vec3 left{ up.y * fwd.z - up.z * fwd.y, up.z * fwd.x - up.x * fwd.z, up.x * fwd.y - up.y * fwd.x };
 			const float m[13] = { 1.f, fwd.x, fwd.y, fwd.z, left.x, left.y, left.z, up.x, up.y, up.z, pos.x, pos.y, pos.z };
 			auto& out = mLines[(int)cat];
-			for (const auto& b : it->second)
-			{
-				for (const auto& l : b.lines) out.push_back({ igTransform(m, l.a), igTransform(m, l.b) });
-				for (const auto& t : b.tris) mObjectTris.push_back({ igTransform(m, t.a), igTransform(m, t.b), igTransform(m, t.c) });
-			}
+			for (int si = 0; si < nsel; ++si)
+				for (const auto& b : oc->regions[sel[si].r].perms[sel[si].p].bsps)
+				{
+					// each collision bsp is bound to a node (collision_model_bsp.node_index): use that node's world matrix,
+					// the root transform only when the node is missing, out of range, or invalid (xlive does the same, node-first)
+					float nm[13];
+					const float* bm = m;
+					if (b.node != 0xFFFF && h2::objectNodeMatrix(o.obj, b.node, nm) && sanePlacement(nm)) bm = nm;
+					else if (!rootOk) continue;
+					for (const auto& l : b.lines) out.push_back({ igTransform(bm, l.a), igTransform(bm, l.b) });
+					for (const auto& t : b.tris) mObjectTris.push_back({ igTransform(bm, t.a), igTransform(bm, t.b), igTransform(bm, t.c) });
+				}
 		}
 	}
 
@@ -308,23 +501,29 @@ namespace h2cv
 		if (sbsp != mSbsp)
 		{
 			mSbsp = sbsp;
-			mCollCache.clear();
+			mCollCache.clear(); mModelCache.clear();
 			if (okp(sbsp)) rebuildStatic(sbsp);
 			else { mSbsp = 0; for (auto& l : mLines) l.clear(); mStaticTris.clear(); mObjectTris.clear(); return; }
 		}
 		if (wantBreakableLive && (mFrame % 15) == 0)
 		{
+			// Destruction is not recorded in the surface records (tag data, flags never change); the engine keeps it in
+			// the runtime breakable bit row, which collision itself tests (sub_180794590). Read that row once per refresh.
+			uint32_t row[8] = {};
+			const bool haveRow = h2::readWorldBreakableRow(row);
+			const size_t sN = mWorld.surfaces.size();
+			auto intact = [&](uint8_t idx) { return !haveRow || ((row[idx >> 5] >> (idx & 31)) & 1u) != 0; };
+			// a side is solid if it exists, is not invalid, and (when breakable) its breakable bit is still set
+			auto solid = [&](uint16_t s) -> bool {
+				if (s == 0xFFFF || s >= sN) return false;
+				const CollBsp::Surface& sf = mWorld.surfaces[s];
+				if (sf.flags & kInvalid) return false;
+				return !(sf.flags & kBreakable) || intact((uint8_t)sf.breakable);
+			};
 			auto& out = mLines[(int)Cat::Breakable];
 			out.clear();
-			const size_t sN = mWorld.surfaces.size();
-			if (sN && okp(mWorld.liveSurfaces))
-			{
-				std::vector<CollBsp::Surface> live(sN);
-				if (copy(live.data(), mWorld.liveSurfaces, sN * 8))
-					for (const auto& be : mBreakable)
-						if (be.surface < sN && (live[be.surface].flags & kBreakable) && !(live[be.surface].flags & kInvalid))
-							out.push_back(be.l);
-			}
+			for (const auto& be : mBreakable)
+				if (solid(be.left) || solid(be.right)) out.push_back(be.l);
 		}
 		if (wantObjects) gatherObjects();
 		else { for (Cat c : { Cat::Scenery, Cat::Crate, Cat::Machine }) mLines[(int)c].clear(); mObjectTris.clear(); }

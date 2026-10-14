@@ -5,6 +5,8 @@
 // All reads are SEH-guarded (Mem.h): the render thread reads while the simulation thread writes.
 #include <cstdint>
 #include <vector>
+#include <string>
+#include <utility>
 #include <DirectXMath.h>
 
 namespace h2
@@ -39,11 +41,29 @@ namespace h2
 		constexpr uintptr_t FP_PASS         = 0x7E0C60;  // sub_1807E0C60 first-person pass: at ENTRY the world depth is complete (biped incl.), bloom done, no FP/HUD yet
 		constexpr uintptr_t SCENE_RTV       = 0x197EE60; // ID3D11RenderTargetView* scene colour (RGBA8, LDR)
 		constexpr uintptr_t SCENE_DSV       = 0x197EE70; // ID3D11DepthStencilView* world depth (D32_FLOAT_S8X24_UINT, reversed-Z)
+		// breakable surfaces (world BSP): sub_18071ABE0(instance -1, index) reads bit `index` of row
+		// block + 1 + ctx*32 (bit set = intact); sub_18071AC80(-1, index, 0) clears it when the glass is destroyed
+		constexpr uintptr_t BREAKABLE_BLOCK = 0x1648960; // qword ptr to the runtime block (byte 0 = enable flag)
+		constexpr uintptr_t BREAKABLE_CTX   = 0xDF9D74;  // i16 structure-BSP context row (-1 = none)
 	}
 	namespace vt
 	{
 		constexpr uintptr_t RIGID_BODY      = 0xB71058;
 		constexpr uintptr_t STAB_BOX_MOTION = 0xB73080;
+		// the other hkRigidMotion subclasses a phmo rigid body can get (sub_1809CEDB0 switch on the motion type); all share
+		// the hkRigidMotion layout (v +0x50, PREV +0x70, CUR +0x80, rotation columns +0x90, origin +0xC0), see Halo2.cpp readMotion
+		constexpr uintptr_t SPHERE_MOTION      = 0xB71088; // hkSphereMotion           (vInt @+0xF0)
+		constexpr uintptr_t STAB_SPHERE_MOTION = 0xB71188; // hkStabilizedSphereMotion (vInt @+0xF0)
+		constexpr uintptr_t BOX_MOTION         = 0xB72F80; // hkBoxMotion              (vInt @+0xD0)
+		constexpr uintptr_t KEYFRAMED_MOTION   = 0xB73180; // hkKeyframedRigidMotion
+		constexpr uintptr_t FIXED_MOTION       = 0xB73288; // hkFixedRigidMotion
+		// pair-agent containers a multi-shape body (vehicle) goes through before the leaf welder agents
+		constexpr uintptr_t LIST_AGENT         = 0xB6F478; // hkListAgent (child agents: array @+0x18, count @+0x20, parallel to the list shape's children)
+		constexpr uintptr_t LIST_AGENT_S       = 0xB6F4C0; // hkSymmetricAgent<hkListAgent>
+		constexpr uintptr_t TRANSFORM_AGENT    = 0xB6F3E8; // hkTransformAgent (nested agent @+0x18)
+		constexpr uintptr_t TRANSFORM_AGENT_S  = 0xB6F430; // hkSymmetricAgent<hkTransformAgent>
+		constexpr uintptr_t MOPP_AGENT         = 0xB6F8B8; // hkMoppAgent (children {key u32, pad, agent} 16 B array @+0x18, count @+0x20; key = list child index)
+		constexpr uintptr_t MOPP_AGENT_S       = 0xB6F900; // hkSymmetricAgent<hkMoppAgent>
 		constexpr uintptr_t WELDER_AGENT    = 0xB6F788;
 		constexpr uintptr_t WELDER_AGENT_S  = 0xB6F7D0;
 		constexpr uintptr_t SWEEP_AGENT     = 0xB6E1C8;
@@ -79,13 +99,41 @@ namespace h2
 	// tag_block {u32 count, i32 dataOffset}
 	bool resolveBlock(uintptr_t blockAddr, const TagPools& p, uintptr_t& first, uint32_t& count);
 	uintptr_t structureBsp();
+	// world BSP breakable state: 256 bits (bit set = intact). False when unreadable (no level, context -1);
+	// callers then treat every breakable as intact.
+	bool readWorldBreakableRow(uint32_t out[8]);
 	uintptr_t tagData(uint16_t tagIndex, const TagPools& p); // via the meta-header tag instance table
 
 	// ---- objects ----
-	struct ObjectRef { uintptr_t obj; uint32_t datum; uint8_t type; };
+	// hdrFlags = object header entry byte +2: 0x10 = being deleted (object_delete, sub_1808D4D10 `or [hdr+2], 10h`;
+	// every object walk in the engine skips it, e.g. sub_1808D70C0 / sub_180794590 type 3-4)
+	struct ObjectRef { uintptr_t obj; uint32_t datum; uint8_t type; uint8_t hdrFlags; };
 	void enumerateObjects(std::vector<ObjectRef>& out);
 	uintptr_t objectFromDatum(uint32_t datum);
+	// world-space node matrix of an object (real_matrix4x3: scale, forward, left, up, position), current sim pose.
+	// false when the object has no node block, the index is out of range, or the read faults
+	bool objectNodeMatrix(uintptr_t obj, uint16_t node, float out[13]);
+	// object flags u32 @obj+4 bit 0 = hidden (sub_1808D70C0 / sub_1808D7130: `test byte [obj+4], 1`)
+	bool objectHidden(uintptr_t obj);
+	// Runtime region state (sub_1808D6940): i16 size @obj+0x11C, i16 offset @obj+0x11E, count = size / 10, array of
+	// `count` bytes at obj+off = CURRENT model-permutation index of each model (hlmt) region, 0xFF/-1 = none.
+	// Collision itself (sub_180794590, key types 3/4) accepts a bsp only when state[region] == its permutation.
+	// Returns the region count copied into out (<= maxN); 0 when the object has no state block / unreadable.
+	int objectRegionState(uintptr_t obj, int8_t* out, int maxN);
 	uintptr_t localPlayerUnitObject();
+	// every local player's unit object by user slot 0..3 (0 = empty slot); returns the number found.
+	// Table = `*(u32*)(players_globals + 28 + 4*user)` (sub_18069CFF0), four dwords (the sibling table at +12 is the
+	// other 4-entry array, the counts live at +8/+10). Falls back to localPlayerUnitObject() in slot 0.
+	int localPlayerUnits(uintptr_t out[4]);
+
+	// ---- vehicles ----
+	// The Vehicle object (header type 1) a unit is attached to, or 0. The unit's parent object datum is obj+0x14
+	// (object_attach, sub_1808D2050: child+0x14 = parent datum, child+0x18 = marker index; sub_1808D46E0 walks it up to
+	// the root). Any seat (driver / passenger / gunner) counts. Walks up to 4 parents so a unit on a seated turret still
+	// resolves. *vehicleDatum receives the vehicle's object datum.
+	uintptr_t vehicleOfUnit(uintptr_t unit, uint32_t* vehicleDatum = nullptr);
+	// object definition tag: index (low word of the u32 at obj+0) and group (u32 of the tag instance, 0 if unreadable)
+	uint32_t objectDefinitionTag(uintptr_t obj, uint32_t* group = nullptr);
 
 	// ---- Havok ----
 	uintptr_t havokEntityForObject(uintptr_t obj, bool wantDynamic = true);
@@ -93,7 +141,25 @@ namespace h2
 	// world-space capsule of an entity whose shape is (sweep-wrapped) hkCapsuleShape, at Havok's current pose
 	Capsule entityCapsule(uintptr_t entity);
 
-	struct PairInfo { uintptr_t entry = 0, agent = 0; int32_t S = 0; bool found = false; bool agentIsWelder = false; };
+	// hkRigidMotion state of a dynamic entity (all read in ONE copy of motion+0x30..+0xE0)
+	//   +0x30 local centre of mass, +0x50 v, +0x70 PREV.xyz/.w, +0x80 CUR.xyz (centre of mass) / time (+0x8C),
+	//   +0x90/+0xA0/+0xB0 rotation columns, +0xC0 transform translation (= body origin = CUR - R*com, sub_1809DFEB0),
+	//   +0xD0 vInt (box motions) / +0xF0 (sphere motions)
+	struct Motion
+	{
+		enum Kind : uint8_t { None, StabBox, Box, StabSphere, Sphere, Keyframed } kind = None;
+		Vec3 com{}, v{}, prev{}, cur{}, origin{}, vint{};
+		Vec3 rc[3]{ {1, 0, 0}, {0, 1, 0}, {0, 0, 1} };   // rotation matrix columns (body-local -> world)
+		float prevW = 0, time = 0; bool ok = false;
+	};
+	const char* motionKindName(Motion::Kind k);
+	// anyDynamic = false: only the biped's hkStabilizedBoxMotion (as before). true: every dynamic motion class a phmo body
+	// can have (sphere / stabilized sphere / box / stabilized box / keyframed); fixed motions are always rejected.
+	bool readMotion(uintptr_t entity, Motion& out, bool anyDynamic = false);
+
+	enum class AgentKind : uint8_t { Unknown, Welder, List, Transform, Mopp };
+	AgentKind agentKind(uintptr_t agent);
+	struct PairInfo { uintptr_t entry = 0, agent = 0; int32_t S = 0; bool found = false; bool agentIsWelder = false; AgentKind kind = AgentKind::Unknown; };
 	PairInfo findBspPair(uintptr_t entity);
 
 	struct Child
@@ -109,4 +175,47 @@ namespace h2
 	bool readChildren(uintptr_t welderAgent, std::vector<Child>& out);
 
 	uint32_t gameTick();
+
+	// ---- Havok bodies of any object (vehicles) ----
+	// Rigid bodies of an object's havok component (up to 8), the component's PRIMARY record first (comp+0x18 = signed index of
+	// the record whose first phmo rigid body has the lowest node index, -1 = root; written at the end of sub_18070C400 and read
+	// by the vehicle builder sub_18070E000). Returns the count; out[] holds hkRigidBody pointers (dynamic or fixed).
+	int havokBodies(uintptr_t obj, uintptr_t out[8]);
+
+	// rigid transform (hkTransform layout): p -> c[0]*x + c[1]*y + c[2]*z + t
+	struct Xf { Vec3 c[3]{ {1, 0, 0}, {0, 1, 0}, {0, 0, 1} }; Vec3 t{ 0, 0, 0 }; };
+	Vec3 xfPoint(const Xf& x, const Vec3& p);
+	Vec3 xfDir(const Xf& x, const Vec3& d);          // rotation only
+	Xf xfCompose(const Xf& a, const Xf& b);          // a o b (apply b first)
+	Xf motionPose(const Motion& m);                  // body-local -> world
+
+	// One convex primitive of a body's shape, geometry in BODY-LOCAL space (leaf transform shapes already applied).
+	//   capsule (a == b: a sphere): segment a-b grown by r.
+	//   polytope (box / convex vertices): core vertices `verts`, outward face rings `faces`, convex radius r. `wire` = the
+	//   vertices of the hull grown by r (planes pushed out by r), what is drawn.
+	struct ShapeFace { std::vector<uint16_t> ring; Vec3 n{}; };
+	struct ShapePrim
+	{
+		bool capsule = true;
+		Vec3 a{}, b{}; float r = 0;
+		std::vector<Vec3> verts, wire;
+		std::vector<ShapeFace> faces;
+		std::vector<std::pair<uint16_t, uint16_t>> edges;   // unique face-ring edges
+		int hkType = 0;            // raw hkShape type of the primitive (4 sphere, 6 box, 7 capsule, 8 convex vertices, 9 multi-sphere)
+		bool swept = false;        // wrapped in hkConvexSweepShape (23)
+		uintptr_t agent = 0;       // pair sub-agent that collides this primitive against the BSP (0 = unknown); check agentKind()
+	};
+	struct BodyShape
+	{
+		std::vector<ShapePrim> prims;
+		int skipped = 0;           // shapes of a type the walker does not draw (triangle, MOPP-only mesh, ...)
+		std::string desc;          // e.g. "list(10): 3 sweep>convex, 1 box; skipped 2"
+		uintptr_t root = 0; int rootType = 0;
+	};
+	// Walks the entity's shape tree (list / transform / MOPP-BV / sweep wrappers down to sphere, capsule, box, convex
+	// vertices, multi-sphere leaves) in parallel with the (entity, BSP) pair agent tree `rootAgent` (0 = no agent info),
+	// so every leaf knows which welder agent holds its TIMs. False when no leaf could be read.
+	bool readBodyShape(uintptr_t entity, uintptr_t rootAgent, BodyShape& out);
+	// the capsule in BODY-LOCAL space (entityCapsule without the pose applied)
+	Capsule entityCapsuleLocal(uintptr_t entity);
 }

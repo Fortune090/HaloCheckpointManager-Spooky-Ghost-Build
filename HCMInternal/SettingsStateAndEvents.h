@@ -946,6 +946,35 @@ public:
 			nameof(collisionViewerToggle)
 		);
 
+	// Halo 2 chase camera (H2ChaseCamera). A cheat toggle: NOT in allSerialisableOptions, always starts off.
+	std::shared_ptr<BinarySetting<bool>> h2ChaseCameraToggle = std::make_shared<BinarySetting<bool>>
+		(
+			false,
+			[](bool in) { return true; },
+			nameof(h2ChaseCameraToggle)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> h2ChaseCameraNoClip = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(h2ChaseCameraNoClip)
+		);
+
+	std::shared_ptr<BinarySetting<float>> h2ChaseCameraFov = std::make_shared<BinarySetting<float>>
+		(
+			0.f,
+			[](float in) { return in >= 0.f && in <= 150.f; },
+			nameof(h2ChaseCameraFov)
+		);
+
+	std::shared_ptr<BinarySetting<float>> h2ChaseCameraHeight = std::make_shared<BinarySetting<float>>
+		(
+			0.f,
+			[](float in) { return in >= -5.f && in <= 10.f; },
+			nameof(h2ChaseCameraHeight)
+		);
+
 	std::shared_ptr<BinarySetting<SettingsEnums::CollisionViewerOcclusionEnum>> collisionViewerOcclusion = std::make_shared<BinarySetting<SettingsEnums::CollisionViewerOcclusionEnum>>
 		(
 			SettingsEnums::CollisionViewerOcclusionEnum::InFrame_NoBloom,
@@ -1018,30 +1047,142 @@ public:
 
 	std::shared_ptr<BinarySetting<bool>> collisionViewerTim = std::make_shared<BinarySetting<bool>>
 		(
-			true,
+			false,
 			[](bool in) { return true; },
 			nameof(collisionViewerTim)
 		);
 
 	std::shared_ptr<BinarySetting<bool>> collisionViewerTimLabels = std::make_shared<BinarySetting<bool>>
 		(
-			true,
+			false,
 			[](bool in) { return true; },
 			nameof(collisionViewerTimLabels)
 		);
 
 	std::shared_ptr<BinarySetting<bool>> collisionViewerPills = std::make_shared<BinarySetting<bool>>
 		(
-			true,
+			false,
 			[](bool in) { return true; },
 			nameof(collisionViewerPills)
 		);
 
 	std::shared_ptr<BinarySetting<bool>> collisionViewerInfoPanel = std::make_shared<BinarySetting<bool>>
 		(
-			true,
+			false,
 			[](bool in) { return true; },
 			nameof(collisionViewerInfoPanel)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> collisionViewerGhost = std::make_shared<BinarySetting<bool>>
+		(
+			false,
+			[](bool in) { return true; },
+			nameof(collisionViewerGhost)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> collisionViewerGhostBelieved = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerGhostBelieved)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> collisionViewerGhostTrail = std::make_shared<BinarySetting<bool>>
+		(
+			false,
+			[](bool in) { return true; },
+			nameof(collisionViewerGhostTrail)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> collisionViewerGhostRewind = std::make_shared<BinarySetting<bool>>
+		(
+			false,
+			[](bool in) { return true; },
+			nameof(collisionViewerGhostRewind)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> collisionViewerGhostPrev = std::make_shared<BinarySetting<bool>>
+		(
+			false,
+			[](bool in) { return true; },
+			nameof(collisionViewerGhostPrev)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> collisionViewerGhostHalo = std::make_shared<BinarySetting<bool>>
+		(
+			false,
+			[](bool in) { return true; },
+			nameof(collisionViewerGhostHalo)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> collisionViewerGhostEdges = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerGhostEdges)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> collisionViewerGhostEdgesSuspect = std::make_shared<BinarySetting<bool>>
+		(
+			false,
+			[](bool in) { return true; },
+			nameof(collisionViewerGhostEdgesSuspect)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> collisionViewerGhostShowReal = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerGhostShowReal)
+		);
+
+	std::shared_ptr<BinarySetting<SimpleMath::Vector4>> collisionViewerGhostColNormal = std::make_shared<BinarySetting<SimpleMath::Vector4>>
+		(
+			SimpleMath::Vector4{ 1.0000f, 0.4118f, 0.7059f, 1.0f },
+			[](SimpleMath::Vector4 in) { return true; },
+			nameof(collisionViewerGhostColNormal)
+		);
+
+	std::shared_ptr<BinarySetting<SimpleMath::Vector4>> collisionViewerGhostColDesync = std::make_shared<BinarySetting<SimpleMath::Vector4>>
+		(
+			SimpleMath::Vector4{ 0.6667f, 1.0000f, 0.0000f, 1.0f },
+			[](SimpleMath::Vector4 in) { return true; },
+			nameof(collisionViewerGhostColDesync)
+		);
+
+	std::shared_ptr<BinarySetting<SimpleMath::Vector4>> collisionViewerGhostColBelieved = std::make_shared<BinarySetting<SimpleMath::Vector4>>
+		(
+			SimpleMath::Vector4{ 0.6667f, 1.0000f, 0.0000f, 1.0f },
+			[](SimpleMath::Vector4 in) { return true; },
+			nameof(collisionViewerGhostColBelieved)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> collisionViewerGhostVehicles = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerGhostVehicles)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> collisionViewerGhostLog = std::make_shared<BinarySetting<bool>>
+		(
+			false,
+			[](bool in) { return true; },
+			nameof(collisionViewerGhostLog)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> collisionViewerCreases = std::make_shared<BinarySetting<bool>>
+		(
+			false,
+			[](bool in) { return true; },
+			nameof(collisionViewerCreases)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> collisionViewerCreaseFaces = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerCreaseFaces)
 		);
 
 	std::shared_ptr<BinarySetting<bool>> collisionViewerReversedZ = std::make_shared<BinarySetting<bool>>
@@ -1060,7 +1201,7 @@ public:
 
 	std::shared_ptr<BinarySetting<float>> collisionViewerDepthPull = std::make_shared<BinarySetting<float>>
 		(
-			0.0015f,
+			0.002f,
 			[](float in) { return in >= 0.f && in <= 0.05f; },
 			nameof(collisionViewerDepthPull)
 		);
@@ -1068,7 +1209,7 @@ public:
 	std::shared_ptr<BinarySetting<float>> collisionViewerRadius = std::make_shared<BinarySetting<float>>
 		(
 			60.f,
-			[](float in) { return in >= 1.f && in <= 2000.f; },
+			[](float in) { return in >= 1.f && in <= 4096.f; },
 			nameof(collisionViewerRadius)
 		);
 

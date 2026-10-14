@@ -695,6 +695,70 @@ const std::map <GUIElementEnum, std::vector<OptionalCheatEnum>> GUIRequiredServi
 		{OptionalCheatEnum::CollisionViewer}
 	},
 
+	{ GUIElementEnum::collisionViewerGhostGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerGhostBelievedGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerGhostTrailGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerGhostRewindGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerGhostPrevGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerGhostHaloGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerGhostEdgesGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerGhostEdgesSuspectGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerGhostShowRealGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerGhostColNormalGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerGhostColDesyncGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerGhostColBelievedGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerGhostVehiclesGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerGhostLogGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerCreasesGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerCreaseFacesGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
 	{ GUIElementEnum::collisionViewerLineWidthGUI,
 		{OptionalCheatEnum::CollisionViewer}
 	},
@@ -721,6 +785,22 @@ const std::map <GUIElementEnum, std::vector<OptionalCheatEnum>> GUIRequiredServi
 
 	{ GUIElementEnum::h2ShadowResolutionCombo,
 		{OptionalCheatEnum::H2ShadowResolution}
+	},
+
+	{ GUIElementEnum::h2ChaseCameraToggleGUI,
+		{OptionalCheatEnum::H2ChaseCamera}
+	},
+
+	{ GUIElementEnum::h2ChaseCameraNoClipGUI,
+		{OptionalCheatEnum::H2ChaseCamera}
+	},
+
+	{ GUIElementEnum::h2ChaseCameraFovGUI,
+		{OptionalCheatEnum::H2ChaseCamera}
+	},
+
+	{ GUIElementEnum::h2ChaseCameraHeightGUI,
+		{OptionalCheatEnum::H2ChaseCamera}
 	},
 
 	{ GUIElementEnum::h2ArmorColourToggle,

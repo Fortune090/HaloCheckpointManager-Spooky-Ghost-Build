@@ -3,7 +3,9 @@
 #include "H2CV_Mem.h"
 #include "H2CV_Log.h"
 #include <windows.h>
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 using namespace mem;
@@ -114,6 +116,15 @@ namespace h2
 
 	uintptr_t structureBsp() { return q(base() + rva::SBSP); }
 
+	bool readWorldBreakableRow(uint32_t out[8])
+	{
+		const uintptr_t block = q(base() + rva::BREAKABLE_BLOCK);
+		const int16_t ctx = (int16_t)u16(base() + rva::BREAKABLE_CTX, 0xFFFF);
+		if (!okp(block) || ctx < 0) return false;
+		// the row sub_18071ABE0 uses for instance -1: block + 1 + ctx * 32 (8 dwords = 256 breakable bits)
+		return copy(out, block + 1 + (uintptr_t)ctx * 32, 8 * sizeof(uint32_t));
+	}
+
 	uintptr_t tagData(uint16_t tagIndex, const TagPools& p)
 	{
 		const uintptr_t meta = q(base() + rva::META_HEADER);
@@ -160,6 +171,34 @@ namespace h2
 		return pb + off;
 	}
 
+	bool objectNodeMatrix(uintptr_t obj, uint16_t node, float out[13])
+	{
+		// nodes block reference in the object datum: i16 size @+0x118, i16 offset @+0x11A (52-B stride).
+		// capstone on halo2_1.3528.dll: sub_1808D6600 (movsx [obj+0x11a], imul 0x34), sub_1808D11A0 (movsx [+0x118], /52)
+		int16_t size = 0, off = 0;
+		if (!okp(obj) || !copy(&size, obj + 0x118, 2) || !copy(&off, obj + 0x11A, 2)) return false;
+		if (off <= 0 || size < 52) return false;               // 0xFFFF (NONE) or empty block
+		if (node >= (uint32_t)size / 52) return false;         // count = size / sizeof(real_matrix4x3)
+		return copy(out, obj + (uintptr_t)off + (uintptr_t)node * 52, 52);
+	}
+
+	bool objectHidden(uintptr_t obj)
+	{
+		return (u32(obj + 4, 0) & 1u) != 0;
+	}
+
+	int objectRegionState(uintptr_t obj, int8_t* out, int maxN)
+	{
+		// sub_1808D6940 (decompiled): v11 = *(i16*)(obj+284); count = v11 / 10; base = obj + *(i16*)(obj+286)
+		int16_t size = 0, off = 0;
+		if (!okp(obj) || !copy(&size, obj + 0x11C, 2) || !copy(&off, obj + 0x11E, 2)) return 0;
+		if (off <= 0 || size < 10) return 0;
+		int n = size / 10;
+		if (n > maxN) n = maxN;
+		if (n <= 0 || !copy(out, obj + (uintptr_t)off, (size_t)n)) return 0;
+		return n;
+	}
+
 	void enumerateObjects(std::vector<ObjectRef>& out)
 	{
 		out.clear();
@@ -177,7 +216,7 @@ namespace h2
 			const uint16_t salt = *(const uint16_t*)e;
 			const uint32_t off = *(const uint32_t*)(e + 8);
 			if (salt == 0 || off == 0xFFFFFFFF) continue;
-			out.push_back({ pb + off, ((uint32_t)salt << 16) | (uint32_t)i, e[3] });
+			out.push_back({ pb + off, ((uint32_t)salt << 16) | (uint32_t)i, e[3], e[2] });
 		}
 	}
 
@@ -206,7 +245,130 @@ namespace h2
 		return unit == 0xFFFFFFFF ? 0 : objectFromDatum(unit);
 	}
 
+	int localPlayerUnits(uintptr_t out[4])
+	{
+		for (int i = 0; i < 4; ++i) out[i] = 0;
+		int n = 0;
+		const uintptr_t b = base();
+		const uintptr_t pg = q(b + rva::PLAYERS_GLOBALS), phdr = q(b + rva::PLAYERS_ARRAY);
+		if (okp(pg) && okp(phdr))
+			for (int u = 0; u < 4; ++u)
+			{
+				const uint32_t pd = u32(pg + 28 + 4 * (uintptr_t)u);
+				if (pd == 0xFFFFFFFF) continue;
+				const uintptr_t player = datumGet(phdr, pd, true);
+				if (!player) continue;
+				const uint32_t unit = u32(player + 44);
+				if (unit == 0xFFFFFFFF) continue;
+				if ((out[u] = objectFromDatum(unit)) != 0) ++n;
+			}
+		if (!n && (out[0] = localPlayerUnitObject()) != 0) n = 1;
+		return n;
+	}
+
+	uintptr_t vehicleOfUnit(uintptr_t unit, uint32_t* vehicleDatum)
+	{
+		if (vehicleDatum) *vehicleDatum = 0xFFFFFFFF;
+		const uintptr_t hdr = q(base() + rva::OBJ_HEADER);
+		uintptr_t obj = unit;
+		for (int depth = 0; depth < 4 && okp(obj); ++depth)
+		{
+			// obj+0x14 = parent object datum, -1 = none (sub_1808D2050 object_attach writes it; sub_1808D46E0 @0x1808D47C0
+			// `mov r8d,[rax+14h]; cmp r8d,-1` walks it)
+			const uint32_t parent = u32(obj + 0x14);
+			if (parent == 0xFFFFFFFF) return 0;
+			const uintptr_t entry = datumGet(hdr, parent, true);
+			const uintptr_t pobj = entry ? objectFromDatum(parent) : 0;
+			if (!entry || !pobj) return 0;
+			if (u8(entry + 3) == Vehicle && !(u8(entry + 2) & 0x10))   // header type byte, 0x10 = being deleted
+			{
+				if (vehicleDatum) *vehicleDatum = parent;
+				return pobj;
+			}
+			obj = pobj;
+		}
+		return 0;
+	}
+
+	uint32_t objectDefinitionTag(uintptr_t obj, uint32_t* group)
+	{
+		if (group) *group = 0;
+		const uint32_t idx = u16(obj, 0xFFFF);   // sub_18070E000: `*v4` (u16 at the object) indexes the tag instance table
+		if (idx == 0xFFFF) return idx;
+		if (group)
+		{
+			const uintptr_t meta = q(base() + rva::META_HEADER);
+			const int32_t groups = okp(meta) ? i32(meta + 0x04, -1) : -1;
+			if (groups >= 0 && groups <= 4096)
+				*group = u32(meta + 0x20 + (size_t)groups * 0x0C + (size_t)idx * 0x10 + 0x00, 0);
+		}
+		return idx;
+	}
+
 	// ---- Havok ------------------------------------------------------------------------------------
+	const char* motionKindName(Motion::Kind k)
+	{
+		switch (k)
+		{
+		case Motion::StabBox: return "stabilized box";
+		case Motion::Box: return "box";
+		case Motion::StabSphere: return "stabilized sphere";
+		case Motion::Sphere: return "sphere";
+		case Motion::Keyframed: return "keyframed";
+		default: return "?";
+		}
+	}
+
+	bool readMotion(uintptr_t entity, Motion& m, bool anyDynamic)
+	{
+		m = Motion{};
+		const uintptr_t motion = q(entity + 0x68);
+		if (!okp(motion)) return false;
+		// Every dynamic hkRigidMotion subclass runs the same integrate (decompiled sub_1809DD250 / 1809DE540 sphere,
+		// 1809DE820 stabilized sphere, 1809DEC80 / 1809E02E0 box, 1809E05F0 stabilized box, 1809E0AC0 keyframed):
+		//   PREV (+0x70) := CUR (+0x80); CUR += dt * v (+0x50); rotation (+0x40 quat -> +0x90 columns) updated;
+		//   origin (+0xC0) = CUR - R * com (+0x30); time (+0x8C) := 1.0
+		// and the constructors (sub_1809CEAE0 / 1809DEAD0 / 1809E0960, all `rigid motion` bases) lay out +0x30..+0xC0 identically.
+		// Only vInt differs: +0xD0 for box motions (a1+208), +0xF0 for sphere motions (a1+240); keyframed motions keep none.
+		const uintptr_t vtab = q(motion), b = base();
+		Motion::Kind kind = Motion::None; uintptr_t vintOff = 0;
+		if (vtab == b + vt::STAB_BOX_MOTION) { kind = Motion::StabBox; vintOff = 0xD0; }
+		else if (anyDynamic)
+		{
+			if (vtab == b + vt::BOX_MOTION) { kind = Motion::Box; vintOff = 0xD0; }
+			else if (vtab == b + vt::STAB_SPHERE_MOTION) { kind = Motion::StabSphere; vintOff = 0xF0; }
+			else if (vtab == b + vt::SPHERE_MOTION) { kind = Motion::Sphere; vintOff = 0xF0; }
+			else if (vtab == b + vt::KEYFRAMED_MOTION) { kind = Motion::Keyframed; vintOff = 0; }
+		}
+		if (kind == Motion::None) return false;   // fixed / unknown motions: not a live body
+		float buf[0xB0 / 4];
+		if (!copy(buf, motion + 0x30, sizeof(buf))) return false;
+		auto V = [&](int off) { const int i = (off - 0x30) / 4; return Vec3{ buf[i], buf[i + 1], buf[i + 2] }; };
+		m.kind = kind;
+		m.com = V(0x30); m.v = V(0x50); m.prev = V(0x70); m.cur = V(0x80); m.origin = V(0xC0);
+		m.rc[0] = V(0x90); m.rc[1] = V(0xA0); m.rc[2] = V(0xB0);
+		m.vint = m.v;
+		if (vintOff)
+		{
+			float vi[3];
+			if (copy(vi, motion + vintOff, sizeof(vi))) m.vint = { vi[0], vi[1], vi[2] };
+		}
+		m.prevW = buf[(0x7C - 0x30) / 4]; m.time = buf[(0x8C - 0x30) / 4];
+		m.ok = std::isfinite(m.cur.x) && std::isfinite(m.cur.y) && std::isfinite(m.cur.z) &&
+		       std::isfinite(m.prev.x) && std::isfinite(m.prev.y) && std::isfinite(m.prev.z) &&
+		       std::isfinite(m.origin.x) && std::isfinite(m.origin.z) && std::isfinite(m.time);
+		if (m.ok && anyDynamic)
+		{
+			// a rotating body: the rotation columns must be finite and roughly orthonormal
+			for (const Vec3& c : m.rc)
+			{
+				const float l2 = c.x * c.x + c.y * c.y + c.z * c.z;
+				if (!std::isfinite(l2) || l2 < 0.8f || l2 > 1.2f) m.ok = false;
+			}
+		}
+		return m.ok;
+	}
+
 	uintptr_t havokEntityForObject(uintptr_t obj, bool wantDynamic)
 	{
 		const uintptr_t b = base();
@@ -229,6 +391,31 @@ namespace h2
 		return wantDynamic ? 0 : firstAny;
 	}
 
+	int havokBodies(uintptr_t obj, uintptr_t out[8])
+	{
+		const uintptr_t b = base();
+		const uint32_t hd = u32(obj + 0xB4);
+		if (hd == 0xFFFFFFFF || hd == 0) return 0;
+		int32_t elsz = 0;
+		const uintptr_t comp = datumGet(q(b + rva::HAVOK_COMPS), hd, false, &elsz);
+		if (!comp || elsz != 192) return 0;
+		const uintptr_t recs = q(comp + 112);
+		const int32_t n = i32(comp + 120, 0);
+		if (!okp(recs) || n <= 0 || n > 64) return 0;
+		int cnt = 0;
+		auto add = [&](int32_t i)
+		{
+			const uintptr_t e = q(recs + 112 * (uintptr_t)i + 64);
+			if (!okp(e) || q(e) != b + vt::RIGID_BODY) return;
+			for (int k = 0; k < cnt; ++k) if (out[k] == e) return;
+			if (cnt < 8) out[cnt++] = e;
+		};
+		const int8_t primary = (int8_t)u8(comp + 0x18, 0xFF);   // sub_18070C400 tail: comp+24 = primary record index (-1 = none)
+		if (primary >= 0 && primary < n) add(primary);
+		for (int32_t i = 0; i < n; ++i) add(i);
+		return cnt;
+	}
+
 	static inline Vec3 xform(const float R[12], const float t[3], const float p[3])
 	{
 		// motion transform: three rotation COLUMNS (16-B stride) at motion+0x90/+0xA0/+0xB0, translation at +0xC0
@@ -237,28 +424,54 @@ namespace h2
 		         R[2] * p[0] + R[6] * p[1] + R[10] * p[2] + t[2] };
 	}
 
-	Capsule entityCapsule(uintptr_t entity)
+	Capsule entityCapsuleLocal(uintptr_t entity)
 	{
 		Capsule c;
-		const uintptr_t motion = q(entity + 0x68);
 		uintptr_t shape = q(entity + 0x18);                  // collidable (entity+0x18) +0 = shape
-		if (!okp(motion) || !okp(shape)) return c;
+		if (!okp(shape)) return c;
 		// unwrap hkConvexSweepShape (vtbl 0xB6E468, getType 23): child at +0x40 (sub_18098AA90); then require
 		// hkCapsuleShape (vtbl 0xB70230, ctor sub_1809B1350): radius +0x18 (= A.w = B.w), A +0x20, B +0x30
 		const uintptr_t b = base();
 		if (q(shape) == b + 0xB6E468) shape = q(shape + 0x40);
-		if (!okp(shape) || q(shape) != b + 0xB70230) return c;
-		float a[4], bb[4], R[12], t[4];
+		// two vtables for the same capsule class: 0xB70230 and 0xB19E50 hold identical method pointers (COMDAT copy);
+		// the player's crouch-rebuilt pill came back with 0xB19E50 live (2026-10-13), so accept either
+		if (!okp(shape)) return c;
+		const uintptr_t svt = q(shape);
+		if (svt != b + 0xB70230 && svt != b + 0xB19E50) return c;
+		float a[4], bb[4];
 		if (!copy(a, shape + 0x20, 16) || !copy(bb, shape + 0x30, 16)) return c;
-		if (!copy(R, motion + 0x90, 48) || !copy(t, motion + 0xC0, 16)) return c;
 		float r = a[3];                                      // H2 Havok 2 capsule: radius in A.w (+0x2C)
 		if (!(r > 0.02f && r < 2.f)) r = f32(shape + 0x18, 0.f);
 		if (!(r > 0.02f && r < 2.f)) return c;
 		const float ab2 = (a[0] - bb[0]) * (a[0] - bb[0]) + (a[1] - bb[1]) * (a[1] - bb[1]) + (a[2] - bb[2]) * (a[2] - bb[2]);
 		if (!(ab2 < 16.f)) return c;
-		c.a = xform(R, t, a); c.b = xform(R, t, bb); c.r = r;
+		c.a = { a[0], a[1], a[2] }; c.b = { bb[0], bb[1], bb[2] }; c.r = r;
+		c.ok = std::isfinite(a[0]) && std::isfinite(bb[2]);
+		return c;
+	}
+
+	Capsule entityCapsule(uintptr_t entity)
+	{
+		Capsule c = entityCapsuleLocal(entity);
+		const uintptr_t motion = q(entity + 0x68);
+		if (!c.ok || !okp(motion)) { c.ok = false; return c; }
+		float R[12], t[4];
+		if (!copy(R, motion + 0x90, 48) || !copy(t, motion + 0xC0, 16)) { c.ok = false; return c; }
+		const float a[3] = { c.a.x, c.a.y, c.a.z }, bb[3] = { c.b.x, c.b.y, c.b.z };
+		c.a = xform(R, t, a); c.b = xform(R, t, bb);
 		c.ok = std::isfinite(c.a.x) && std::isfinite(c.b.z);
 		return c;
+	}
+
+	AgentKind agentKind(uintptr_t agent)
+	{
+		if (!okp(agent)) return AgentKind::Unknown;
+		const uintptr_t v = q(agent) - base();
+		if (v == vt::WELDER_AGENT || v == vt::WELDER_AGENT_S) return AgentKind::Welder;
+		if (v == vt::LIST_AGENT || v == vt::LIST_AGENT_S) return AgentKind::List;
+		if (v == vt::TRANSFORM_AGENT || v == vt::TRANSFORM_AGENT_S) return AgentKind::Transform;
+		if (v == vt::MOPP_AGENT || v == vt::MOPP_AGENT_S) return AgentKind::Mopp;
+		return AgentKind::Unknown;
 	}
 
 	PairInfo findBspPair(uintptr_t entity)
@@ -286,8 +499,8 @@ namespace h2
 					out.agent = *(const uintptr_t*)(e + 16);
 					out.S = *(const int32_t*)(e + 24);
 					out.found = true;
-					const uintptr_t avt = q(out.agent) - b;
-					out.agentIsWelder = okp(out.agent) && (avt == vt::WELDER_AGENT || avt == vt::WELDER_AGENT_S);
+					out.kind = agentKind(out.agent);
+					out.agentIsWelder = out.kind == AgentKind::Welder;
 					return true;
 				}
 			}
@@ -352,5 +565,377 @@ namespace h2
 			out.push_back(c);
 		}
 		return true;
+	}
+
+	// ---- rigid transforms ---------------------------------------------------------------------------------------
+	Vec3 xfPoint(const Xf& x, const Vec3& p)
+	{
+		return { x.c[0].x * p.x + x.c[1].x * p.y + x.c[2].x * p.z + x.t.x,
+		         x.c[0].y * p.x + x.c[1].y * p.y + x.c[2].y * p.z + x.t.y,
+		         x.c[0].z * p.x + x.c[1].z * p.y + x.c[2].z * p.z + x.t.z };
+	}
+
+	Vec3 xfDir(const Xf& x, const Vec3& d)
+	{
+		return { x.c[0].x * d.x + x.c[1].x * d.y + x.c[2].x * d.z,
+		         x.c[0].y * d.x + x.c[1].y * d.y + x.c[2].y * d.z,
+		         x.c[0].z * d.x + x.c[1].z * d.y + x.c[2].z * d.z };
+	}
+
+	Xf xfCompose(const Xf& a, const Xf& b)
+	{
+		Xf o;
+		for (int i = 0; i < 3; ++i) o.c[i] = xfDir(a, b.c[i]);
+		o.t = xfPoint(a, b.t);
+		return o;
+	}
+
+	Xf motionPose(const Motion& m)
+	{
+		Xf x;
+		for (int i = 0; i < 3; ++i) x.c[i] = m.rc[i];
+		x.t = m.origin;
+		return x;
+	}
+
+	// ---- shape tree walker (vehicles) ---------------------------------------------------------------------------
+	// Shape layouts (all offsets from the constructors, decompiled with Hex-Rays on halo2.dll 1.3528):
+	//   hkShape        refcount u16 @+0x0A, user data @+0x10 ;  getType() = vtable slot 5 (+0x28), a `mov eax,imm32 / ret` leaf
+	//   hkConvexShape  radius f32 @+0x18                       (sub_1809B0820 box, 1809B12D0 capsule, 1809B2440 convex, 1809B4410 sphere)
+	//   sphere (4)     radius @+0x18, centre = leaf-local origin
+	//   box (6)        half extents xyz @+0x20 (w = min), radius @+0x18; support point = he * sign(dir), GSK adds the radius
+	//   capsule (7)    A xyz @+0x20, B xyz @+0x30, radius @+0x18 (= A.w = B.w)
+	//   convex vertices (8)  vertices: 4-wide SoA blocks of 48 B {x[4], y[4], z[4]} at *(+0x40), count @+0xE0 (sub_1809B2990);
+	//                        planes {n.xyz, d} 16 B at *(+0xE8), count @+0xF0; n.p + d < 0 inside (ray cast sub_1809B2620)
+	//   multi-sphere (9)     count @+0x18, spheres {centre xyz, radius w} 16 B at +0x20 (sub_1809B3800)
+	//   list (10)      child array @+0x18 (16 B entries, shape pointer first), count @+0x20 (sub_1809AF870; sub_1809A3950 reads them)
+	//   transform (21) child @+0x18, hkTransform (3 rotation columns + translation, 16 B each) @+0x20 (sub_1809AFDD0)
+	//   sweep (23)     child @+0x40 (sub_18098AA90)
+	//   BV (17) / MOPP (19)  child @+0x18 (sub_18098BC50; the phmo post-process sub_180734350 stores the child there too)
+	// Vtable -> type: phmo tags embed shapes whose vtables are COMDAT clones (0xB19DF0.. next to the 0xB70xxx originals), so
+	// the type is read from the vtable's own getType leaf instead of comparing vtable addresses.
+	namespace
+	{
+		constexpr int kMaxPrims = 160, kMaxDepth = 8;
+
+		int shapeTypeOf(uintptr_t shape)
+		{
+			if (!okp(shape)) return -1;
+			const uintptr_t b = base();
+			const uintptr_t v = q(shape);
+			if (v < b || v - b > 0x2000000) return -1;
+			const uintptr_t fn = q(v + 0x28);
+			if (fn < b || fn - b > 0x2000000) return -1;
+			uint8_t c[6];
+			if (!copy(c, fn, 6) || c[0] != 0xB8 || c[5] != 0xC3) return -1;     // mov eax, imm32 ; ret
+			int32_t t; memcpy(&t, c + 1, 4);
+			return t;
+		}
+
+		inline bool finite3(const Vec3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
+		inline Vec3 vsub(const Vec3& a, const Vec3& b) { return { a.x - b.x, a.y - b.y, a.z - b.z }; }
+		inline Vec3 vadd(const Vec3& a, const Vec3& b) { return { a.x + b.x, a.y + b.y, a.z + b.z }; }
+		inline Vec3 vmul(const Vec3& a, float s) { return { a.x * s, a.y * s, a.z * s }; }
+		inline float vdot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+		inline Vec3 vcross(const Vec3& a, const Vec3& b) { return { a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x }; }
+		inline Vec3 vnorm(const Vec3& a) { const float l = std::sqrt(vdot(a, a)); return l > 1e-12f ? vmul(a, 1.f / l) : Vec3{ 0, 0, 1 }; }
+
+		bool readXf(uintptr_t addr, Xf& out)
+		{
+			float m[16];
+			if (!copy(m, addr, sizeof(m))) return false;
+			for (int i = 0; i < 16; ++i) if (!std::isfinite(m[i]) || std::fabs(m[i]) > 1e5f) return false;
+			out.c[0] = { m[0], m[1], m[2] }; out.c[1] = { m[4], m[5], m[6] }; out.c[2] = { m[8], m[9], m[10] };
+			out.t = { m[12], m[13], m[14] };
+			for (const Vec3& c : out.c)           // rigid (or near-rigid) only: allow the odd scale wrapper, reject garbage
+			{
+				const float l2 = vdot(c, c);
+				if (!(l2 > 0.01f && l2 < 100.f)) return false;
+			}
+			return true;
+		}
+
+		// unique edges + radius-grown wire vertices of a polytope (verts, faces with outward normals already set)
+		void finishPoly(ShapePrim& p)
+		{
+			std::vector<uint32_t> keys;
+			for (const auto& f : p.faces)
+				for (size_t i = 0; i < f.ring.size(); ++i)
+				{
+					uint32_t u = f.ring[i], v = f.ring[(i + 1) % f.ring.size()];
+					if (u > v) std::swap(u, v);
+					if (u != v) keys.push_back((u << 16) | v);
+				}
+			std::sort(keys.begin(), keys.end());
+			keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+			p.edges.clear();
+			for (uint32_t k : keys) p.edges.push_back({ (uint16_t)(k >> 16), (uint16_t)(k & 0xFFFF) });
+			p.wire = p.verts;
+			if (!(p.r > 1e-5f)) return;
+			// grow the hull by the convex radius: vertex v -> point on the three (or more) face planes pushed out by r,
+			// least squares over the incident faces: (sum n n^T) d = r * sum n
+			std::vector<std::vector<int>> inc(p.verts.size());
+			for (size_t fi = 0; fi < p.faces.size(); ++fi)
+				for (uint16_t vi : p.faces[fi].ring) if (vi < inc.size()) inc[vi].push_back((int)fi);
+			for (size_t vi = 0; vi < p.verts.size(); ++vi)
+			{
+				double A[3][3] = {}, sum[3] = {};
+				for (int fi : inc[vi])
+				{
+					const double n[3] = { p.faces[fi].n.x, p.faces[fi].n.y, p.faces[fi].n.z };
+					for (int i = 0; i < 3; ++i) { sum[i] += n[i]; for (int j = 0; j < 3; ++j) A[i][j] += n[i] * n[j]; }
+				}
+				const double det = A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1]) - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0]) + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]);
+				Vec3 d = vmul(vnorm(Vec3{ (float)sum[0], (float)sum[1], (float)sum[2] }), p.r);
+				if (inc[vi].size() >= 3 && std::fabs(det) > 1e-3)
+				{
+					const double r[3] = { sum[0] * p.r, sum[1] * p.r, sum[2] * p.r };
+					double X[3];
+					for (int c = 0; c < 3; ++c)
+					{
+						double M[3][3]; memcpy(M, A, sizeof(M));
+						for (int i = 0; i < 3; ++i) M[i][c] = r[i];
+						X[c] = (M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0]) + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0])) / det;
+					}
+					const Vec3 dd{ (float)X[0], (float)X[1], (float)X[2] };
+					if (finite3(dd) && std::sqrt(vdot(dd, dd)) <= 3.f * p.r) d = dd;
+				}
+				p.wire[vi] = vadd(p.verts[vi], d);
+			}
+		}
+
+		// make every face normal point away from the polytope's centroid
+		void orientFaces(ShapePrim& p)
+		{
+			Vec3 cen{ 0, 0, 0 };
+			for (const Vec3& v : p.verts) cen = vadd(cen, v);
+			cen = vmul(cen, 1.f / (float)std::max<size_t>(1, p.verts.size()));
+			for (auto& f : p.faces)
+			{
+				Vec3 fc{ 0, 0, 0 };
+				for (uint16_t vi : f.ring) fc = vadd(fc, p.verts[vi]);
+				fc = vmul(fc, 1.f / (float)std::max<size_t>(1, f.ring.size()));
+				if (vdot(f.n, vsub(fc, cen)) < 0) f.n = vmul(f.n, -1.f);
+			}
+		}
+
+		struct Walker
+		{
+			BodyShape& out;
+			int cnt[32] = {};
+			explicit Walker(BodyShape& o) : out(o) {}
+
+			void addCapsule(const Vec3& a, const Vec3& b, float r, const Xf& xf, int hkType, bool swept, uintptr_t agent)
+			{
+				if (out.prims.size() >= (size_t)kMaxPrims) return;
+				ShapePrim p; p.capsule = true; p.hkType = hkType; p.swept = swept; p.agent = agent;
+				p.a = xfPoint(xf, a); p.b = xfPoint(xf, b); p.r = r;
+				if (!finite3(p.a) || !finite3(p.b)) { ++out.skipped; return; }
+				out.prims.push_back(std::move(p));
+			}
+
+			void addPoly(std::vector<Vec3> lv, std::vector<ShapeFace> faces, float r, const Xf& xf, int hkType, bool swept, uintptr_t agent)
+			{
+				if (out.prims.size() >= (size_t)kMaxPrims || lv.size() < 3 || faces.empty()) { ++out.skipped; return; }
+				ShapePrim p; p.capsule = false; p.hkType = hkType; p.swept = swept; p.agent = agent; p.r = r;
+				p.verts.reserve(lv.size());
+				for (const Vec3& v : lv) p.verts.push_back(xfPoint(xf, v));
+				for (auto& f : faces) { f.n = vnorm(xfDir(xf, f.n)); p.faces.push_back(std::move(f)); }
+				orientFaces(p);
+				finishPoly(p);
+				out.prims.push_back(std::move(p));
+			}
+
+			// planes (n.xyz, d; n.p + d = 0, outward n) -> vertex rings, by collecting the vertices lying on each plane
+			bool convexFaces(const std::vector<Vec3>& lv, const std::vector<float>& planes, std::vector<ShapeFace>& faces)
+			{
+				float ext = 1e-4f;
+				for (const Vec3& v : lv) ext = std::max({ ext, std::fabs(v.x), std::fabs(v.y), std::fabs(v.z) });
+				const float eps = ext * 0.002f + 0.004f;
+				std::vector<std::vector<uint16_t>> seen;
+				for (size_t f = 0; f * 4 + 3 < planes.size(); ++f)
+				{
+					const Vec3 n{ planes[f * 4], planes[f * 4 + 1], planes[f * 4 + 2] };
+					const float dp = planes[f * 4 + 3];
+					const float nl = std::sqrt(vdot(n, n));
+					if (!(nl > 0.5f && nl < 1.5f)) continue;
+					std::vector<uint16_t> idx; Vec3 cen{ 0, 0, 0 };
+					for (size_t k = 0; k < lv.size(); ++k)
+					{
+						const float d = vdot(n, lv[k]) + dp;
+						if (d < eps && d > -eps) { idx.push_back((uint16_t)k); cen = vadd(cen, lv[k]); }
+					}
+					if (idx.size() < 3) continue;
+					cen = vmul(cen, 1.f / (float)idx.size());
+					const Vec3 h = std::fabs(n.x) < 0.9f ? Vec3{ 1, 0, 0 } : Vec3{ 0, 1, 0 };
+					const Vec3 u = vnorm(vcross(n, h)), w = vcross(n, u);
+					std::vector<std::pair<float, uint16_t>> ang;
+					for (uint16_t k : idx) { const Vec3 d = vsub(lv[k], cen); ang.push_back({ std::atan2(vdot(d, w), vdot(d, u)), k }); }
+					std::sort(ang.begin(), ang.end());
+					ShapeFace fc; fc.n = vmul(n, 1.f / nl);
+					for (auto& a : ang) fc.ring.push_back(a.second);
+					std::vector<uint16_t> key = fc.ring; std::sort(key.begin(), key.end());
+					bool dup = false;
+					for (const auto& s2 : seen) if (s2 == key) { dup = true; break; }
+					if (dup) continue;
+					seen.push_back(std::move(key));
+					faces.push_back(std::move(fc));
+				}
+				return !faces.empty();
+			}
+
+			void leaf(uintptr_t shape, int t, const Xf& xf, bool swept, uintptr_t agent)
+			{
+				++cnt[t & 31];
+				switch (t)
+				{
+				case 4:   // sphere
+				{
+					const float r = f32(shape + 0x18, 0.f);
+					if (r > 0.f && r < 100.f) addCapsule({ 0, 0, 0 }, { 0, 0, 0 }, r, xf, t, swept, agent); else ++out.skipped;
+					break;
+				}
+				case 7:   // capsule
+				{
+					float a[4], b[4];
+					if (!copy(a, shape + 0x20, 16) || !copy(b, shape + 0x30, 16)) { ++out.skipped; break; }
+					float r = a[3];
+					if (!(r > 0.001f && r < 100.f)) r = f32(shape + 0x18, 0.f);
+					if (r > 0.001f && r < 100.f) addCapsule({ a[0], a[1], a[2] }, { b[0], b[1], b[2] }, r, xf, t, swept, agent); else ++out.skipped;
+					break;
+				}
+				case 9:   // multi-sphere: every sphere is a degenerate capsule sharing the primitive's agent
+				{
+					const int n = i32(shape + 0x18, 0);
+					if (n < 1 || n > 16) { ++out.skipped; break; }
+					for (int i = 0; i < n; ++i)
+					{
+						float s4[4];
+						if (!copy(s4, shape + 0x20 + 16 * (uintptr_t)i, 16) || !(s4[3] > 0.001f && s4[3] < 100.f)) continue;
+						addCapsule({ s4[0], s4[1], s4[2] }, { s4[0], s4[1], s4[2] }, s4[3], xf, t, swept, agent);
+					}
+					break;
+				}
+				case 6:   // box
+				{
+					float he[3];
+					if (!copy(he, shape + 0x20, 12)) { ++out.skipped; break; }
+					float r = f32(shape + 0x18, 0.f); if (!(r >= 0.f && r < 5.f)) r = 0.f;
+					for (float& h : he) if (!(h > 0.f && h < 1e4f)) { ++out.skipped; return; }
+					std::vector<Vec3> lv;
+					for (int i = 0; i < 8; ++i) lv.push_back({ (i & 1) ? he[0] : -he[0], (i & 2) ? he[1] : -he[1], (i & 4) ? he[2] : -he[2] });
+					static const uint16_t F[6][4] = { {0, 2, 3, 1}, {4, 5, 7, 6}, {0, 1, 5, 4}, {2, 6, 7, 3}, {0, 4, 6, 2}, {1, 3, 7, 5} };
+					static const Vec3 N[6] = { {0, 0, -1}, {0, 0, 1}, {0, -1, 0}, {0, 1, 0}, {-1, 0, 0}, {1, 0, 0} };
+					std::vector<ShapeFace> faces;
+					for (int f = 0; f < 6; ++f) { ShapeFace fc; fc.ring.assign(F[f], F[f] + 4); fc.n = N[f]; faces.push_back(fc); }
+					addPoly(std::move(lv), std::move(faces), r, xf, t, swept, agent);
+					break;
+				}
+				case 8:   // convex vertices
+				{
+					const int nv = i32(shape + 0xE0, -1), np = i32(shape + 0xF0, -1);
+					const uintptr_t vdata = q(shape + 0x40), pdata = q(shape + 0xE8);
+					float r = f32(shape + 0x18, 0.f); if (!(r >= 0.f && r < 5.f)) r = 0.f;
+					if (nv < 3 || nv > 256 || !okp(vdata)) { ++out.skipped; break; }
+					const int nb = (nv + 3) / 4;
+					std::vector<float> raw((size_t)nb * 12);
+					if (!copy(raw.data(), vdata, raw.size() * 4)) { ++out.skipped; break; }
+					std::vector<Vec3> lv((size_t)nv);
+					for (int k = 0; k < nv; ++k)
+					{
+						const float* blk = &raw[(size_t)(k / 4) * 12];
+						lv[(size_t)k] = { blk[k & 3], blk[4 + (k & 3)], blk[8 + (k & 3)] };
+						if (!finite3(lv[(size_t)k])) { ++out.skipped; return; }
+					}
+					std::vector<ShapeFace> faces;
+					if (np >= 1 && np <= 256 && okp(pdata))
+					{
+						std::vector<float> pl((size_t)np * 4);
+						if (copy(pl.data(), pdata, pl.size() * 4)) convexFaces(lv, pl, faces);
+					}
+					if (faces.empty())   // no usable planes: fall back to the bounding box of the vertices
+					{
+						Vec3 mn = lv[0], mx = lv[0];
+						for (const Vec3& v : lv) { mn = { std::min(mn.x, v.x), std::min(mn.y, v.y), std::min(mn.z, v.z) }; mx = { std::max(mx.x, v.x), std::max(mx.y, v.y), std::max(mx.z, v.z) }; }
+						lv.clear();
+						for (int i = 0; i < 8; ++i) lv.push_back({ (i & 1) ? mx.x : mn.x, (i & 2) ? mx.y : mn.y, (i & 4) ? mx.z : mn.z });
+						static const uint16_t F[6][4] = { {0, 2, 3, 1}, {4, 5, 7, 6}, {0, 1, 5, 4}, {2, 6, 7, 3}, {0, 4, 6, 2}, {1, 3, 7, 5} };
+						static const Vec3 N[6] = { {0, 0, -1}, {0, 0, 1}, {0, -1, 0}, {0, 1, 0}, {-1, 0, 0}, {1, 0, 0} };
+						for (int f = 0; f < 6; ++f) { ShapeFace fc; fc.ring.assign(F[f], F[f] + 4); fc.n = N[f]; faces.push_back(fc); }
+					}
+					addPoly(std::move(lv), std::move(faces), r, xf, t, swept, agent);
+					break;
+				}
+				default: ++out.skipped; break;
+				}
+			}
+
+			void walk(uintptr_t shape, uintptr_t agent, const Xf& xf, int depth, bool swept)
+			{
+				if (depth > kMaxDepth || !okp(shape) || out.prims.size() >= (size_t)kMaxPrims) return;
+				const int t = shapeTypeOf(shape);
+				const AgentKind ak = agentKind(agent);
+				switch (t)
+				{
+				case 23: ++cnt[23]; walk(q(shape + 0x40), agent, xf, depth + 1, true); break;
+				case 21:
+				{
+					Xf T;
+					if (!readXf(shape + 0x20, T)) { ++out.skipped; break; }
+					++cnt[21];
+					walk(q(shape + 0x18), ak == AgentKind::Transform ? q(agent + 0x18) : 0, xfCompose(xf, T), depth + 1, swept);
+					break;
+				}
+				case 10:
+				{
+					const int n = i32(shape + 0x20, -1);
+					const uintptr_t arr = q(shape + 0x18);
+					if (n < 1 || n > 256 || !okp(arr)) { ++out.skipped; break; }
+					++cnt[10];
+					uintptr_t aarr = 0; int an = 0;
+					if (ak == AgentKind::List) { aarr = q(agent + 0x18); an = i32(agent + 0x20, 0); if (!okp(aarr)) an = 0; }
+					// a MOPP over the list (sub_1809AAC20): children {key, pad, agent} 16 B, key = the list child index
+					// (hkListShape::getChildShape(key) = list[key], sub_1809AFAA0)
+					struct MoppEnt { uint32_t key, pad; uintptr_t agent; };
+					std::vector<MoppEnt> ments;
+					if (ak == AgentKind::Mopp)
+					{
+						const uintptr_t marr = q(agent + 0x18); const int mn = i32(agent + 0x20, 0);
+						if (okp(marr) && mn > 0 && mn <= 512) { ments.resize((size_t)mn); if (!copy(ments.data(), marr, ments.size() * sizeof(MoppEnt))) ments.clear(); }
+					}
+					for (int i = 0; i < n; ++i)
+					{
+						uintptr_t ca = 0;
+						if (ak == AgentKind::List) ca = i < an ? q(aarr + 8 * (uintptr_t)i) : 0;
+						else for (const auto& e : ments) if (e.key == (uint32_t)i) { ca = e.agent; break; }
+						walk(q(arr + 16 * (uintptr_t)i), ca, xf, depth + 1, swept);
+					}
+					break;
+				}
+				case 19: ++cnt[t]; walk(q(shape + 0x18), ak == AgentKind::Mopp ? agent : 0, xf, depth + 1, swept); break;   // MOPP agent keys the list below
+				case 17: ++cnt[t]; walk(q(shape + 0x18), 0, xf, depth + 1, swept); break;
+				case 4: case 6: case 7: case 8: case 9: leaf(shape, t, xf, swept, agent); break;
+				default: ++cnt[t >= 0 && t < 32 ? t : 31]; ++out.skipped; break;   // triangle (5), mesh (11), welder (20), unknown
+				}
+			}
+		};
+	}
+
+	bool readBodyShape(uintptr_t entity, uintptr_t rootAgent, BodyShape& out)
+	{
+		out = BodyShape{};
+		const uintptr_t shape = q(entity + 0x18);
+		if (!okp(shape)) return false;
+		out.root = shape; out.rootType = shapeTypeOf(shape);
+		Walker w(out);
+		w.walk(shape, rootAgent, Xf{}, 0, false);
+		char buf[256];
+		int n = snprintf(buf, sizeof(buf), "root type %d", out.rootType);
+		static const struct { int t; const char* nm; } names[] = { {23, "sweep"}, {21, "transform"}, {10, "list"}, {19, "mopp"}, {17, "bv"}, {4, "sphere"}, {6, "box"}, {7, "capsule"}, {8, "convex"}, {9, "multisphere"} };
+		for (const auto& nm : names)
+			if (w.cnt[nm.t] && n > 0 && n < (int)sizeof(buf) - 24) n += snprintf(buf + n, sizeof(buf) - n, ", %d %s", w.cnt[nm.t], nm.nm);
+		if (out.skipped && n > 0 && n < (int)sizeof(buf) - 24) snprintf(buf + n, sizeof(buf) - n, ", %d skipped", out.skipped);
+		out.desc = buf;
+		return !out.prims.empty();
 	}
 }

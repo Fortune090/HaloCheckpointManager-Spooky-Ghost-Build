@@ -12766,6 +12766,24 @@
 	</VersionedEntry>
 
 
+	<!-- halo2.dll sub_1806D4C50: director "should this unit use the following (chase) camera?" predicate. int(uint unitIndex, short* perspectiveCode). -->
+	<VersionedEntry Name="h2ChaseCameraPredicateFunction" Type="MultilevelPointer::ModuleOffset">
+		<Version Version="1.3528.0.0" Game="Halo2">
+			<Module>halo2.dll</Module>
+			<Offsets>
+				<Offset>0x6D4C50</Offset>
+			</Offsets>
+		</Version>
+	</VersionedEntry>
+	<!-- halo2.dll sub_18077C9F0: following (chase) camera update = director camera mode pointer; writes the observer command (flags @+0). -->
+	<VersionedEntry Name="h2ChaseCameraFollowUpdateFunction" Type="MultilevelPointer::ModuleOffset">
+		<Version Version="1.3528.0.0" Game="Halo2">
+			<Module>halo2.dll</Module>
+			<Offsets>
+				<Offset>0x77C9F0</Offset>
+			</Offsets>
+		</Version>
+	</VersionedEntry>
 	<VersionedEntry Name="thirdPersonRenderingValueToSet" Type="int64_t">
 		<Version Version="All" Game="Halo1">
 			<Offset>2</Offset>

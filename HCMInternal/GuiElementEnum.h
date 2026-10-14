@@ -766,6 +766,10 @@
    above and in pch.h - building is the only reliable check). Declaration order has no effect on where a row appears;
    the menu layout comes from the createNestedElement calls in GUIElementConstructor. */
 #define RELEASEGUIELEMENTS_ANDSUPPORTEDGAMES4 \
+	((h2ChaseCameraToggleGUI, (Halo2)))\
+	((h2ChaseCameraNoClipGUI, (Halo2)))\
+	((h2ChaseCameraFovGUI, (Halo2)))\
+	((h2ChaseCameraHeightGUI, (Halo2)))\
 	((hceVisibleGeometryOverlayToggleGUI, (HALOCER_ONLY)))\
 	((hceVisibleGeometryOverlaySettingsSubheading, (HALOCER_ONLY)))\
 			((hceVisibleGeometryOverlayRadius, (HALOCER_ONLY)))\
@@ -793,6 +797,22 @@
 			((collisionViewerTimLabelsGUI, (Halo2)))\
 			((collisionViewerPillsGUI, (Halo2)))\
 			((collisionViewerInfoPanelGUI, (Halo2)))\
+			((collisionViewerGhostGUI, (Halo2)))\
+			((collisionViewerGhostBelievedGUI, (Halo2)))\
+			((collisionViewerGhostTrailGUI, (Halo2)))\
+			((collisionViewerGhostRewindGUI, (Halo2)))\
+			((collisionViewerGhostPrevGUI, (Halo2)))\
+			((collisionViewerGhostHaloGUI, (Halo2)))\
+			((collisionViewerGhostEdgesGUI, (Halo2)))\
+			((collisionViewerGhostEdgesSuspectGUI, (Halo2)))\
+			((collisionViewerGhostShowRealGUI, (Halo2)))\
+			((collisionViewerGhostColNormalGUI, (Halo2)))\
+			((collisionViewerGhostColDesyncGUI, (Halo2)))\
+			((collisionViewerGhostColBelievedGUI, (Halo2)))\
+			((collisionViewerGhostVehiclesGUI, (Halo2)))\
+			((collisionViewerGhostLogGUI, (Halo2)))\
+			((collisionViewerCreasesGUI, (Halo2)))\
+			((collisionViewerCreaseFacesGUI, (Halo2)))\
 			((collisionViewerLineWidthGUI, (Halo2)))\
 			((collisionViewerDepthPullGUI, (Halo2)))\
 			((collisionViewerRadiusGUI, (Halo2)))\
