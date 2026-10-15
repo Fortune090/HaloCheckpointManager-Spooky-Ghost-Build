@@ -4,6 +4,8 @@
 #include "H2CV_Mem.h"
 #include "H2CV_Log.h"
 #include "H2CV_TimKeys.h"
+#include "H2CV_ViewerUtil.h"
+#include "H2CV_Engine.h"
 #include <imgui.h>
 #include <cmath>
 #include <cstdio>
@@ -12,6 +14,7 @@
 namespace h2cv
 {
 	using h2::Vec3;
+	using namespace vu;
 
 	const char* occlusionName(Occlusion o)
 	{
@@ -27,220 +30,6 @@ namespace h2cv
 
 	namespace
 	{
-		constexpr uint32_t rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) { return (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16) | ((uint32_t)a << 24); }
-		const uint32_t kCatColor[kCatCount] = {
-			rgba(0, 230, 255),    // BSP: cyan
-			rgba(255, 50, 50),    // BSP invisible: red
-			rgba(255, 140, 0),    // breakable: orange
-			rgba(70, 120, 255),   // instanced: blue
-			rgba(180, 70, 255),   // instanced invisible: purple
-			rgba(255, 0, 255),    // scenery: magenta
-			rgba(0, 255, 90),     // crates: green
-			rgba(255, 130, 190),  // machines: pink
-			rgba(255, 90, 0),     // kill triggers: red-orange
-		};
-
-		inline Vec3 sub(const Vec3& a, const Vec3& b) { return { a.x - b.x, a.y - b.y, a.z - b.z }; }
-		inline Vec3 add(const Vec3& a, const Vec3& b) { return { a.x + b.x, a.y + b.y, a.z + b.z }; }
-		inline Vec3 mul(const Vec3& a, float s) { return { a.x * s, a.y * s, a.z * s }; }
-		inline float dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-		inline Vec3 cross(const Vec3& a, const Vec3& b) { return { a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x }; }
-		inline float len(const Vec3& a) { return std::sqrt(dot(a, a)); }
-		inline Vec3 norm(const Vec3& a) { const float l = len(a); return l > 1e-9f ? mul(a, 1.f / l) : Vec3{ 0, 0, 1 }; }
-
-		float pointSegDist2(const Vec3& p, const Vec3& a, const Vec3& b)
-		{
-			const Vec3 ab = sub(b, a);
-			const float l2 = dot(ab, ab);
-			const float t = l2 > 0 ? std::clamp(dot(sub(p, a), ab) / l2, 0.f, 1.f) : 0.f;
-			const Vec3 d = sub(p, add(a, mul(ab, t)));
-			return dot(d, d);
-		}
-
-		// closest distance^2 between segments p1q1 and p2q2 (Ericson, Real-Time Collision Detection 5.1.9)
-		float segSegDist2(const Vec3& p1, const Vec3& q1, const Vec3& p2, const Vec3& q2)
-		{
-			const Vec3 d1 = sub(q1, p1), d2 = sub(q2, p2), r = sub(p1, p2);
-			const float a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r);
-			float s, t;
-			if (a <= 1e-12f && e <= 1e-12f) return dot(r, r);
-			if (a <= 1e-12f) { s = 0; t = std::clamp(f / e, 0.f, 1.f); }
-			else
-			{
-				const float c = dot(d1, r);
-				if (e <= 1e-12f) { t = 0; s = std::clamp(-c / a, 0.f, 1.f); }
-				else
-				{
-					const float b = dot(d1, d2), den = a * e - b * b;
-					s = den != 0 ? std::clamp((b * f - c * e) / den, 0.f, 1.f) : 0.f;
-					t = (b * s + f) / e;
-					if (t < 0) { t = 0; s = std::clamp(-c / a, 0.f, 1.f); }
-					else if (t > 1) { t = 1; s = std::clamp((b - c) / a, 0.f, 1.f); }
-				}
-			}
-			const Vec3 d = sub(add(p1, mul(d1, s)), add(p2, mul(d2, t)));
-			return dot(d, d);
-		}
-
-		// distance from segment AB to a planar convex polygon (0 if it crosses)
-		float segPolyDist(const Vec3& A, const Vec3& B, const std::vector<Vec3>& poly)
-		{
-			if (poly.size() < 3) return 1e9f;
-			const Vec3 n = norm(cross(sub(poly[1], poly[0]), sub(poly[2], poly[0])));
-			auto inside = [&](const Vec3& p) {
-				for (size_t i = 0; i < poly.size(); ++i)
-				{
-					const Vec3& a = poly[i]; const Vec3& b = poly[(i + 1) % poly.size()];
-					if (dot(cross(sub(b, a), sub(p, a)), n) < -1e-6f) return false;
-				}
-				return true; };
-			const float da = dot(sub(A, poly[0]), n), db = dot(sub(B, poly[0]), n);
-			if ((da > 0) != (db > 0) && std::fabs(da - db) > 1e-9f)
-			{
-				const Vec3 x = add(A, mul(sub(B, A), da / (da - db)));
-				if (inside(x)) return 0.f;
-			}
-			float best = 1e18f;
-			for (const Vec3* p : { &A, &B })
-			{
-				const float h = dot(sub(*p, poly[0]), n);
-				const Vec3 proj = sub(*p, mul(n, h));
-				if (inside(proj)) best = std::min(best, h * h);
-			}
-			for (size_t i = 0; i < poly.size(); ++i)
-				best = std::min(best, segSegDist2(A, B, poly[i], poly[(i + 1) % poly.size()]));
-			return std::sqrt(best);
-		}
-
-		struct Label { float x, y; uint32_t col; char text[40]; };
-		std::vector<Label> gLabels;
-
-		void addLine(std::vector<LineVertex>& v, const Vec3& a, const Vec3& b, uint32_t c)
-		{
-			v.push_back({ a.x, a.y, a.z, c });
-			v.push_back({ b.x, b.y, b.z, c });
-		}
-
-		// capsule wireframe (rings + meridians) and triangles
-		void capsuleWire(std::vector<LineVertex>& v, const h2::Capsule& c, uint32_t col)
-		{
-			const Vec3 axis = norm(sub(c.b, c.a));
-			const Vec3 t1 = norm(std::fabs(axis.z) < 0.9f ? cross(axis, Vec3{ 0, 0, 1 }) : cross(axis, Vec3{ 1, 0, 0 }));
-			const Vec3 t2 = cross(axis, t1);
-			// same tessellation as Cartographer's xlive pill (CollisionLines.cpp pill_build_wireframe): 24-segment rings at
-			// each hemisphere's equator and at 45 degrees, 8 meridians running pole to pole with 6-segment quarter arcs
-			constexpr int kRing = 24, kMeridians = 8, kArc = 6;
-			auto surf = [&](const Vec3& centre, float sgn, float ang, float lat) {
-				const Vec3 dir = add(mul(t1, std::cos(ang)), mul(t2, std::sin(ang)));
-				return add(centre, add(mul(dir, std::cos(lat) * c.r), mul(axis, sgn * std::sin(lat) * c.r))); };
-			for (int top = 0; top < 2; ++top)
-			{
-				const Vec3& centre = top ? c.b : c.a;
-				const float sgn = top ? 1.f : -1.f;
-				for (int ri = 0; ri < 2; ++ri)                          // equator, then 45 degrees
-				{
-					const float lat = 0.78539816f * ri;
-					for (int si = 0; si < kRing; ++si)
-					{
-						const float a0 = 6.2831853f * si / kRing, a1 = 6.2831853f * (si + 1) / kRing;
-						addLine(v, surf(centre, sgn, a0, lat), surf(centre, sgn, a1, lat), col);
-					}
-				}
-			}
-			for (int mi = 0; mi < kMeridians; ++mi)
-			{
-				const float ang = 6.2831853f * mi / kMeridians;
-				addLine(v, surf(c.a, -1, ang, 0.f), surf(c.b, 1, ang, 0.f), col);   // the straight side
-				for (int ai = 0; ai < kArc; ++ai)
-				{
-					const float l0 = 1.5707963f * ai / kArc, l1 = 1.5707963f * (ai + 1) / kArc;
-					addLine(v, surf(c.b, 1, ang, l0), surf(c.b, 1, ang, l1), col);
-					addLine(v, surf(c.a, -1, ang, l0), surf(c.a, -1, ang, l1), col);
-				}
-			}
-		}
-
-		void capsuleTris(std::vector<Tri>& out, const h2::Capsule& c)
-		{
-			const Vec3 axis = norm(sub(c.b, c.a));
-			const Vec3 t1 = norm(std::fabs(axis.z) < 0.9f ? cross(axis, Vec3{ 0, 0, 1 }) : cross(axis, Vec3{ 1, 0, 0 }));
-			const Vec3 t2 = cross(axis, t1);
-			constexpr int N = 12, M = 4;
-			auto pt = [&](int i, int j) -> Vec3 {
-				// j in [-M, M]: latitude rings; j<0 bottom hemisphere around A, j>=0 top around B
-				const float ang = 6.2831853f * i / N;
-				const float lat = 1.5707963f * (float)std::abs(j) / M;
-				const Vec3 radial = add(mul(t1, std::cos(ang)), mul(t2, std::sin(ang)));
-				const Vec3 centre = j < 0 ? c.a : c.b;
-				const float s = j < 0 ? -1.f : 1.f;
-				return add(centre, add(mul(radial, std::cos(lat) * c.r), mul(axis, s * std::sin(lat) * c.r)));
-			};
-			for (int j = -M; j < M; ++j)
-				for (int i = 0; i < N; ++i)
-				{
-					int ja = j, jb = j + 1;
-					Vec3 p00 = pt(i, ja), p10 = pt(i + 1, ja), p01 = pt(i, jb), p11 = pt(i + 1, jb);
-					if (j == -1) { p01 = pt(i, 0); p11 = pt(i + 1, 0); } // cylinder band between the hemispheres
-					out.push_back({ p00, p10, p11 });
-					out.push_back({ p00, p11, p01 });
-				}
-		}
-
-		// ---- ghost subject geometry (biped capsule or vehicle shape primitives, body-local + pose) ----------------
-		Vec3 xfp(const h2::Xf& x, const Vec3& p) { return h2::xfPoint(x, p); }
-
-		// wireframe of one primitive at `pose`, translated by `shift` (believed / previous / halo / rewind copies)
-		void primWire(std::vector<LineVertex>& v, const h2::ShapePrim& p, const h2::Xf& pose, const Vec3& shift, uint32_t col)
-		{
-			if (p.capsule)
-			{
-				h2::Capsule c; c.a = add(xfp(pose, p.a), shift); c.b = add(xfp(pose, p.b), shift); c.r = p.r; c.ok = true;
-				capsuleWire(v, c, col);
-				return;
-			}
-			std::vector<Vec3> w(p.wire.size());
-			for (size_t i = 0; i < w.size(); ++i) w[i] = add(xfp(pose, p.wire[i]), shift);
-			for (const auto& e : p.edges)
-				if (e.first < w.size() && e.second < w.size()) addLine(v, w[e.first], w[e.second], col);
-		}
-
-		Vec3 primCentre(const h2::ShapePrim& p, const h2::Xf& pose)
-		{
-			if (p.capsule) return mul(add(xfp(pose, p.a), xfp(pose, p.b)), 0.5f);
-			Vec3 c{ 0, 0, 0 };
-			for (const Vec3& v : p.verts) c = add(c, xfp(pose, v));
-			return p.verts.empty() ? c : mul(c, 1.f / (float)p.verts.size());
-		}
-
-		// Distance from the primitive's SURFACE (core minus its convex radius) to a planar convex polygon; 0 - r when they
-		// intersect. Capsule / sphere: exact. Polytope (box, convex vertices): exact for two convex sets that do not
-		// interpenetrate = min over (polytope edges x polygon) and (polygon edges x polytope faces) -- every closest feature
-		// pair of two convex polytopes is vertex/edge against face/edge, and segPolyDist handles segment-vs-planar-polygon
-		// including the boundary edges. Penetration depth is not computed (clamped at -r).
-		float primSurfaceDist(const h2::ShapePrim& p, const h2::Xf& pose, const std::vector<Vec3>& poly)
-		{
-			if (poly.size() < 3) return 1e9f;
-			if (p.capsule) return segPolyDist(xfp(pose, p.a), xfp(pose, p.b), poly) - p.r;
-			std::vector<Vec3> w(p.verts.size());
-			for (size_t i = 0; i < w.size(); ++i) w[i] = xfp(pose, p.verts[i]);
-			float best = 1e9f;
-			for (const auto& e : p.edges)
-				if (e.first < w.size() && e.second < w.size()) best = std::min(best, segPolyDist(w[e.first], w[e.second], poly));
-			if (best > 0.f)
-			{
-				std::vector<Vec3> ring;
-				for (const auto& f : p.faces)
-				{
-					ring.clear();
-					for (uint16_t vi : f.ring) if (vi < w.size()) ring.push_back(w[vi]);
-					if (ring.size() < 3) continue;
-					for (size_t i = 0; i < poly.size() && best > 0.f; ++i)
-						best = std::min(best, segPolyDist(poly[i], poly[(i + 1) % poly.size()], ring));
-				}
-			}
-			return best - p.r;
-		}
-
 		// what the ghost view is showing for one local user: the vehicle the unit is seated in, else the biped
 		struct GhostSubject
 		{
@@ -303,14 +92,6 @@ namespace h2cv
 			sj.m = m; sj.pair = pair; sj.pose = h2::motionPose(m);
 		}
 
-		uint32_t timColor(float over, bool skipping, int manifold)
-		{
-			if (manifold > 0) return rgba(255, 255, 255);
-			if (!skipping) return rgba(150, 150, 150);
-			if (over > 0.02f) return rgba(255, 30, 30);    // over-credited: Havok believes it is much farther than it is
-			if (over > 0.005f) return rgba(255, 170, 0);
-			return rgba(255, 255, 0);                       // skipping honestly
-		}
 	}
 
 	bool Viewer::initDevice(ID3D11Device* dev, ID3D11DeviceContext* ctx)
@@ -363,11 +144,11 @@ namespace h2cv
 		for (int c = 0; c < kCatCount; ++c)
 		{
 			if (!settings.show[c]) continue;
-			for (const auto& l : mWorld.lines((Cat)c))
+			mWorld.forNear((Cat)c, cam.pos, R, [&](const Line& l)
 			{
-				if (pointSegDist2(cam.pos, l.a, l.b) > R2) continue;
+				if (pointSegDist2(cam.pos, l.a, l.b) > R2) return;
 				addLine(mScratch, l.a, l.b, kCatColor[c]);
-			}
+			});
 		}
 		mR.drawLines(mScratch.data(), mScratch.size(), settings.lineWidth, settings.pull, own, game, settings.hiddenAlpha);
 
@@ -438,20 +219,6 @@ namespace h2cv
 	// overcredit_start / overcredit_end (a polygon's TIM over-credit episode). Raw data for finding the ground truth.
 	namespace
 	{
-		std::string jv(const h2::Vec3& v)
-		{
-			char b[96]; snprintf(b, sizeof(b), "[%.5f,%.5f,%.5f]", v.x, v.y, v.z); return b;
-		}
-		std::string jf(float f) { char b[32]; snprintf(b, sizeof(b), "%.6g", std::isfinite(f) ? f : 0.f); return b; }
-		std::string levelCode()
-		{
-			// current level code string (halo2.dll+0xE70E68, the one AnimationFixes' cyclotron check reads)
-			char s[33] = {};
-			if (!mem::copy(s, h2::base() + 0xE70E68, 32)) return "";
-			std::string r;
-			for (char c : s) { if (!c) break; r += (c >= 32 && c < 127 && c != '"' && c != '\\') ? c : '?'; }
-			return r;
-		}
 	}
 
 	bool Viewer::logEnsureOpen()
@@ -461,7 +228,7 @@ namespace h2cv
 		HMODULE self = nullptr;
 		wchar_t dir[MAX_PATH] = {};
 		if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-			(LPCWSTR)&levelCode, &self) && GetModuleFileNameW(self, dir, MAX_PATH))
+			(LPCWSTR)&vu::jv, &self) && GetModuleFileNameW(self, dir, MAX_PATH))
 		{
 			if (wchar_t* slash = wcsrchr(dir, L'\\')) slash[1] = 0;
 		}
@@ -527,7 +294,7 @@ namespace h2cv
 		if (!settings.ghostLog && mLogFile) logClose();
 		if (!settings.ghostLog) mLogPath.clear();          // re-enabling opens a fresh file
 		const bool logOn = settings.ghostLog && logEnsureOpen();
-		const std::string lvl = logOn ? levelCode() : std::string();
+		const std::string lvl = logOn ? eng::levelCode() : std::string();
 
 		for (int u = 0; u < 4; ++u)
 		{
@@ -566,7 +333,7 @@ namespace h2cv
 			std::vector<std::pair<uint32_t, Vec3>> contacts;          // touching children (manifold > 0): key, cached normal
 			std::vector<std::pair<uint64_t, std::string>> pendStart;  // over-credit episodes that started this frame
 			auto head = [&](const char* ev) {
-				return std::string("{\"event\":\"") + ev + "\",\"tick\":" + std::to_string(tick) + ",\"map\":\"" + lvl +
+				return std::string("{\"event\":\"") + ev + "\",\"engine\":\"halo2\",\"tick\":" + std::to_string(tick) + ",\"map\":\"" + lvl +
 					"\",\"user\":" + std::to_string(u) + ",\"subject\":\"" + (sj.vehicle ? "vehicle" : "biped") + "\",\"cur\":" + jv(m.cur) +
 					",\"prev\":" + jv(m.prev) + ",\"v\":" + jv(m.v) + ",\"vint\":" + jv(m.vint) + ",\"S\":" + std::to_string(pair.found ? pair.S : 0); };
 			if (gp.obj != sj.obj) { gp = GhostPlayer{}; gp.obj = sj.obj; }
@@ -888,12 +655,12 @@ namespace h2cv
 			if (!mInFrameNote.empty()) ImGui::TextColored(ImVec4(1, 0.75f, 0.2f, 1), "%s", mInFrameNote.c_str());
 			ImGui::Text("width %.1fpx  pull %.4f  hidden %.2f  radius %.0f",
 				settings.lineWidth.load(), settings.pull.load(), settings.hiddenAlpha.load(), settings.nearRadius.load());
-			for (int c = 0; c < kCatCount; ++c)
+			for (int c = 0; c < (int)Cat::SoftCeiling; ++c)   // soft ceilings are a Halo 3 / ODST category
 			{
 				const uint32_t col = kCatColor[c];
 				ImGui::TextColored(ImVec4((col & 0xFF) / 255.f, ((col >> 8) & 0xFF) / 255.f, ((col >> 16) & 0xFF) / 255.f, 1),
 					"%s %s  %zu", settings.show[c] ? "[x]" : "[ ]", catName((Cat)c), mWorld.lines((Cat)c).size());
-				if (c % 3 != 2 && c != kCatCount - 1) ImGui::SameLine();
+				if (c % 3 != 2 && c != (int)Cat::SoftCeiling - 1) ImGui::SameLine();
 			}
 			ImGui::Separator();
 			ImGui::Text("TIM overlay %s  labels %s  capsules %s", settings.tim ? "on" : "off",
@@ -1002,6 +769,7 @@ namespace h2cv
 
 	void Viewer::setBloomSuppressed(bool off)
 	{
+		if (isH3()) return;   // the bloom gate is a Halo 2 global
 		const uintptr_t gate = h2::base() + 0xE19438; // dword_180E19438: sub_180951EC0 skips bloom (sub_18096FBF0) when non-zero
 		if (!h2::base()) return;
 		if (off)
@@ -1020,17 +788,30 @@ namespace h2cv
 
 	bool Viewer::drawViewInto(ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv, const h2::GameFrame& f, const D3D11_VIEWPORT& vp)
 	{
-		const bool reversed = settings.gameZReversed.load();
+		const bool h3g = isH3();
+		// Halo 2: the stored projection is standard-Z while the depth buffer holds 1 - z/w (flip applied in gameViewProj).
+		// Halo 3 / ODST: the engine builds the projection for the depth convention in use (reversed when its byte is set) - used as stored.
+		const bool reversed = h3g ? h3::depthReversed() : settings.gameZReversed.load();
 		const bool wantObjects = settings.show[(int)Cat::Scenery] || settings.show[(int)Cat::Crate] || settings.show[(int)Cat::Machine];
+		if (h3g) mWorld.setWantCreases(settings.creases);
 		mWorld.update(wantObjects, settings.show[(int)Cat::Breakable]);
 		if (!mWorld.valid()) return false;
 		mR.setStandardZ(!reversed);
-		if (!mR.beginExternal(mCtx, rtv, dsv, vp, gameViewProj(f, reversed))) return false;
+		if (!mR.beginExternal(mCtx, rtv, dsv, vp, gameViewProj(f, h3g ? false : reversed))) return false;
 		mR.setStandardZ(!reversed);
 		drawCollision(f.pos, true);
-		if (settings.tim) drawTim();
-		if (settings.pills) drawPills();
-		if (settings.ghost) drawGhost();
+		if (h3g)
+		{
+			if (settings.tim) drawTim3();
+			if (settings.pills) drawPills3();
+			if (settings.ghost) drawGhost3();
+		}
+		else
+		{
+			if (settings.tim) drawTim();
+			if (settings.pills) drawPills();
+			if (settings.ghost) drawGhost();
+		}
 		mR.end();
 		return true;
 	}
@@ -1107,11 +888,13 @@ namespace h2cv
 		mRtv = rtv; mW = w; mH = h;
 
 		++mPresentCount;
-		const bool gameOk = h2::base() && h2::buildOk();
+		mWantSim3 = isH3() && (settings.ghost || settings.tim);
+		const bool gameOk = eng::base() && eng::buildOk();
 		h2::Camera cam;
-		if (gameOk) cam = h2::readCamera();
-		mTick = gameOk ? h2::gameTick() : 0;
-		const int occ = settings.occlusion.load();
+		if (gameOk) cam = isH3() ? camera3() : h2::readCamera();
+		mTick = gameOk ? eng::gameTick() : 0;
+		int occ = settings.occlusion.load();
+		if (isH3() && occ == (int)Occlusion::PostBloom) occ = (int)Occlusion::Own;   // there is no post-bloom hook on Halo 3 / ODST
 		const bool engineMode = occ == (int)Occlusion::InFrame || occ == (int)Occlusion::PostBloom;
 		const bool engineDrew = mInFrameThisFrame;
 		mInFrameThisFrame = false;
@@ -1130,7 +913,8 @@ namespace h2cv
 		if (gameOk && cam.ok && !(engineMode && (engineDrew || mPresentCount - mLastInFramePresent <= 2)))
 		{
 			const bool own = occ != (int)Occlusion::XRay;
-			const bool wantObjects = own || settings.show[(int)Cat::Scenery] || settings.show[(int)Cat::Crate] || settings.show[(int)Cat::Machine];
+			const bool wantObjects = (own && !isH3()) || settings.show[(int)Cat::Scenery] || settings.show[(int)Cat::Crate] || settings.show[(int)Cat::Machine];
+			if (isH3()) mWorld.setWantCreases(settings.creases);
 			mWorld.update(wantObjects, settings.show[(int)Cat::Breakable]);
 			mLabelScaleX = mLabelScaleY = 1.f;
 			if (mWorld.valid() && mR.begin(mCtx, mRtv, mW, mH, cam.pos, cam.fwd, cam.up, cam.vfov, 0.01f))
@@ -1138,10 +922,16 @@ namespace h2cv
 				if (own)
 				{
 					mR.clearOwnDepth();
-					mR.setStaticOccluders(mWorld.staticOccluders(), h2::structureBsp() ^ (mWorld.staticOccluders().size() << 1));
+					mR.setStaticOccluders(mWorld.staticOccluders(), mWorld.sbspId() ^ (mWorld.staticOccluders().size() << 1));
 					mR.drawStaticOccluders();
 					mR.drawOccluders(mWorld.objectOccluders());
-					if (settings.bipedOccluders)
+					if (settings.bipedOccluders && isH3())
+					{
+						std::vector<Tri> caps;
+						bipedOccluders3(caps, cam.pos);
+						mR.drawOccluders(caps);
+					}
+					else if (settings.bipedOccluders)
 					{
 						// other bipeds (and the player's own capsule when the camera is outside it, e.g. third person)
 						std::vector<Tri> caps;
@@ -1161,9 +951,18 @@ namespace h2cv
 					}
 				}
 				drawCollision(cam.pos, own);
-				if (settings.tim) drawTim();
-				if (settings.pills) drawPills();
-				if (settings.ghost) drawGhost();
+				if (isH3())
+				{
+					if (settings.tim) drawTim3();
+					if (settings.pills) drawPills3();
+					if (settings.ghost) drawGhost3();
+				}
+				else
+				{
+					if (settings.tim) drawTim();
+					if (settings.pills) drawPills();
+					if (settings.ghost) drawGhost();
+				}
 				mR.end();
 			}
 		}
@@ -1180,8 +979,9 @@ namespace h2cv
 			gLabels.clear();
 			if (settings.hud)
 			{
-				if (!h2::base()) { dl->AddText(ImVec2(12, 12), IM_COL32(255, 200, 0, 255), "Collision Viewer: halo2.dll not loaded"); }
-				else if (!h2::buildOk()) { dl->AddText(ImVec2(12, 12), IM_COL32(255, 60, 60, 255), "Collision Viewer: unsupported halo2.dll build (needs MCC 1.3528)"); }
+				if (!eng::base()) { dl->AddText(ImVec2(12, 12), IM_COL32(255, 200, 0, 255), "Collision Viewer: game module not loaded"); }
+				else if (!eng::buildOk()) { dl->AddText(ImVec2(12, 12), IM_COL32(255, 60, 60, 255), "Collision Viewer: unsupported game build (needs MCC 1.3528)"); }
+				else if (isH3()) drawHud3();
 				else drawHud(cam);
 			}
 		}

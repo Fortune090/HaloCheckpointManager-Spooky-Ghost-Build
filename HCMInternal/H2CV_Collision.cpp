@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "H2CV_Collision.h"
+#include "H2CV_Engine.h"
 #include "H2CV_Mem.h"
 #include "H2CV_Log.h"
 #include <cmath>
@@ -53,6 +54,7 @@ namespace h2cv
 		case Cat::Crate: return "Crates";
 		case Cat::Machine: return "Machines";
 		case Cat::KillTrigger: return "Kill triggers";
+		case Cat::SoftCeiling: return "Soft ceilings";
 		default: return "?";
 		}
 	}
@@ -84,11 +86,25 @@ namespace h2cv
 		if (!h2::resolveBlock(collbsp + kEdgesBlock, p, eF, eN)) return false;
 		if (!h2::resolveBlock(collbsp + kVerticesBlock, p, vF, vN)) return false;
 		if (sN > 200000 || eN > 400000 || vN > 200000 || !eN || !vN) return false;
-		surfaces.resize(sN); edges.resize(eN);
+		struct RawSurf { uint16_t plane, firstEdge; uint8_t flags; int8_t breakable; uint16_t material; };   // 8-byte tag records
+		struct RawEdge { uint16_t v0, v1, fwd, rev, left, right; };                                         // 12-byte tag records
+		std::vector<RawSurf> rs(sN); std::vector<RawEdge> re(eN);
 		std::vector<float> vraw((size_t)vN * 4);
-		if (sN && !copy(surfaces.data(), sF, (size_t)sN * 8)) return false;
-		if (!copy(edges.data(), eF, (size_t)eN * 12)) return false;
+		if (sN && !copy(rs.data(), sF, (size_t)sN * 8)) return false;
+		if (!copy(re.data(), eF, (size_t)eN * 12)) return false;
 		if (!copy(vraw.data(), vF, vraw.size() * 4)) return false;
+		surfaces.resize(sN); edges.resize(eN);
+		for (uint32_t i = 0; i < sN; ++i)
+		{
+			const RawSurf& r = rs[i];
+			surfaces[i] = { (uint32_t)(r.plane & 0x7FFF), r.firstEdge, (r.plane & 0x8000) != 0, r.flags, r.breakable, r.material, (uint16_t)(uint8_t)r.breakable, 0 };
+		}
+		auto edgeRef = [](uint16_t v) -> uint32_t { return v == 0xFFFF ? kNone : v; };
+		for (uint32_t i = 0; i < eN; ++i)
+		{
+			const RawEdge& r = re[i];
+			edges[i] = { r.v0, r.v1, r.fwd, r.rev, edgeRef(r.left), edgeRef(r.right) };
+		}
 		verts.resize(vN);
 		for (uint32_t i = 0; i < vN; ++i) verts[i] = { vraw[i * 4 + 0], vraw[i * 4 + 1], vraw[i * 4 + 2] };
 		return true;
@@ -119,13 +135,13 @@ namespace h2cv
 	bool CollBsp::normal(uint32_t s, Vec3& out) const
 	{
 		if (s >= surfaces.size()) return false;
-		const uint32_t pi = surfaces[s].plane & 0x7FFF;
+		const uint32_t pi = surfaces[s].plane;
 		if ((size_t)pi * 4 + 3 >= planes.size()) return false;
 		Vec3 n{ planes[pi * 4 + 0], planes[pi * 4 + 1], planes[pi * 4 + 2] };
 		const float l = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
 		if (!(l > 0.5f && l < 1.5f)) return false;
 		n = { n.x / l, n.y / l, n.z / l };
-		if (surfaces[s].plane & 0x8000) n = { -n.x, -n.y, -n.z };
+		if (surfaces[s].flip) n = { -n.x, -n.y, -n.z };
 		out = n;
 		return true;
 	}
@@ -208,23 +224,23 @@ namespace h2cv
 	// Classify a bsp's edges into normal / invisible (/ breakable), matching xlive sub_10172480 and the HCM port:
 	// skip edges touching invalid or out-of-range surfaces; breakable edges go to their own list.
 	void CollisionWorld::classify(const CollBsp& bsp, const float* m, Cat normal, Cat invisible, bool withBreakable,
-	                              std::vector<Tri>* trisOut, std::vector<Tri>* invisTrisOut)
+	                              std::vector<Tri>* trisOut, std::vector<Tri>* invisTrisOut, int slot)
 	{
 		const size_t sN = bsp.surfaces.size(), vN = bsp.verts.size();
-		auto flagsOf = [&](uint16_t s) -> int { return (s == 0xFFFF || s >= sN) ? -1 : bsp.surfaces[s].flags; };
+		auto flagsOf = [&](uint32_t s) -> int { return (s == CollBsp::kNone || s >= sN) ? -1 : bsp.surfaces[s].flags; };
 		auto X = [&](const Vec3& v) { return m ? igTransform(m, v) : v; };
 		for (const auto& e : bsp.edges)
 		{
 			if (e.v0 >= vN || e.v1 >= vN || e.v0 == e.v1) continue;
 			const int fL = flagsOf(e.left), fR = flagsOf(e.right);
 			const bool brL = fL >= 0 && (fL & kBreakable), brR = fR >= 0 && (fR & kBreakable);
-			const bool skipL = e.left != 0xFFFF && (fL < 0 || (fL & kInvalid));
-			const bool skipR = e.right != 0xFFFF && (fR < 0 || (fR & kInvalid));
+			const bool skipL = e.left != CollBsp::kNone && (fL < 0 || (fL & kInvalid));
+			const bool skipR = e.right != CollBsp::kNone && (fR < 0 || (fR & kInvalid));
 			if (skipL || skipR) continue;
 			if (brL || brR)
 			{
 				// breakable edges never enter the static lists; update() draws them while a side is still solid
-				if (withBreakable) mBreakable.push_back({ { X(bsp.verts[e.v0]), X(bsp.verts[e.v1]) }, e.left, e.right });
+				if (withBreakable) mBreakable.push_back({ { X(bsp.verts[e.v0]), X(bsp.verts[e.v1]) }, e.left, e.right, slot });
 				continue;
 			}
 			const bool invis = (fL >= 0 && (fL & kInvisible)) || (fR >= 0 && (fR & kInvisible));
@@ -496,6 +512,7 @@ namespace h2cv
 
 	void CollisionWorld::update(bool wantObjects, bool wantBreakableLive)
 	{
+		if (isH3()) { updateH3(wantObjects, wantBreakableLive); return; }
 		++mFrame;
 		const uintptr_t sbsp = h2::structureBsp();
 		if (sbsp != mSbsp)
@@ -514,8 +531,8 @@ namespace h2cv
 			const size_t sN = mWorld.surfaces.size();
 			auto intact = [&](uint8_t idx) { return !haveRow || ((row[idx >> 5] >> (idx & 31)) & 1u) != 0; };
 			// a side is solid if it exists, is not invalid, and (when breakable) its breakable bit is still set
-			auto solid = [&](uint16_t s) -> bool {
-				if (s == 0xFFFF || s >= sN) return false;
+			auto solid = [&](uint32_t s) -> bool {
+				if (s == CollBsp::kNone || s >= sN) return false;
 				const CollBsp::Surface& sf = mWorld.surfaces[s];
 				if (sf.flags & kInvalid) return false;
 				return !(sf.flags & kBreakable) || intact((uint8_t)sf.breakable);

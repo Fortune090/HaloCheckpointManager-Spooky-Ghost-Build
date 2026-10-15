@@ -766,10 +766,10 @@
    above and in pch.h - building is the only reliable check). Declaration order has no effect on where a row appears;
    the menu layout comes from the createNestedElement calls in GUIElementConstructor. */
 #define RELEASEGUIELEMENTS_ANDSUPPORTEDGAMES4 \
-	((h2ChaseCameraToggleGUI, (Halo2)))\
-	((h2ChaseCameraNoClipGUI, (Halo2)))\
-	((h2ChaseCameraFovGUI, (Halo2)))\
-	((h2ChaseCameraHeightGUI, (Halo2)))\
+	((chaseCameraToggleGUI, (Halo2, Halo3, Halo3ODST, HaloReach, Halo4)))\
+	((chaseCameraNoClipGUI, (Halo2, Halo3, Halo3ODST, HaloReach, Halo4)))\
+	((chaseCameraFovGUI, (Halo2, Halo3, Halo3ODST, HaloReach, Halo4)))\
+	((chaseCameraHeightGUI, (Halo2, Halo3, Halo3ODST, HaloReach, Halo4)))\
 	((hceVisibleGeometryOverlayToggleGUI, (HALOCER_ONLY)))\
 	((hceVisibleGeometryOverlaySettingsSubheading, (HALOCER_ONLY)))\
 			((hceVisibleGeometryOverlayRadius, (HALOCER_ONLY)))\
@@ -782,41 +782,43 @@
 			((display2DInfoShowZoneSet, (Halo3, Halo3ODST, HaloReach, Halo4, Halo2MP)))\
 	((havokBroadphaseBypassGUI, (Halo2, Halo3, Halo3ODST, HaloReach, Halo4, Halo2MP, HaloCER)))\
 	((uncapRenderSectionsToggle, (Halo2)))\
-	((collisionViewerToggleGUI, (Halo2)))\
-			((collisionViewerOcclusionGUI, (Halo2)))\
-			((collisionViewerShowBspGUI, (Halo2)))\
-			((collisionViewerShowInstancedGUI, (Halo2)))\
-			((collisionViewerShowInvisibleGUI, (Halo2)))\
-			((collisionViewerShowBreakableGUI, (Halo2)))\
-			((collisionViewerShowSceneryGUI, (Halo2)))\
-			((collisionViewerShowCratesGUI, (Halo2)))\
-			((collisionViewerShowMachinesGUI, (Halo2)))\
-			((collisionViewerShowKillTriggersGUI, (Halo2)))\
-			((collisionViewerFillsGUI, (Halo2)))\
-			((collisionViewerTimGUI, (Halo2)))\
-			((collisionViewerTimLabelsGUI, (Halo2)))\
-			((collisionViewerPillsGUI, (Halo2)))\
-			((collisionViewerInfoPanelGUI, (Halo2)))\
-			((collisionViewerGhostGUI, (Halo2)))\
-			((collisionViewerGhostBelievedGUI, (Halo2)))\
-			((collisionViewerGhostTrailGUI, (Halo2)))\
+	((collisionViewerToggleGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerOcclusionGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerShowBspGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerShowInstancedGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerShowInvisibleGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerShowBreakableGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerShowSceneryGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerShowCratesGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerShowMachinesGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerShowKillTriggersGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerShowSoftCeilingsGUI, (Halo3, Halo3ODST)))\
+			((collisionViewerFillsGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerTimGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerTimLabelsGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerPillsGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerInfoPanelGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerGhostGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerGhostBelievedGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerGhostTrailGUI, (Halo2, Halo3, Halo3ODST)))\
 			((collisionViewerGhostRewindGUI, (Halo2)))\
-			((collisionViewerGhostPrevGUI, (Halo2)))\
-			((collisionViewerGhostHaloGUI, (Halo2)))\
-			((collisionViewerGhostEdgesGUI, (Halo2)))\
-			((collisionViewerGhostEdgesSuspectGUI, (Halo2)))\
-			((collisionViewerGhostShowRealGUI, (Halo2)))\
-			((collisionViewerGhostColNormalGUI, (Halo2)))\
-			((collisionViewerGhostColDesyncGUI, (Halo2)))\
-			((collisionViewerGhostColBelievedGUI, (Halo2)))\
+			((collisionViewerGhostJumpGUI, (Halo3, Halo3ODST)))\
+			((collisionViewerGhostPrevGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerGhostHaloGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerGhostEdgesGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerGhostEdgesSuspectGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerGhostShowRealGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerGhostColNormalGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerGhostColDesyncGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerGhostColBelievedGUI, (Halo2, Halo3, Halo3ODST)))\
 			((collisionViewerGhostVehiclesGUI, (Halo2)))\
-			((collisionViewerGhostLogGUI, (Halo2)))\
-			((collisionViewerCreasesGUI, (Halo2)))\
-			((collisionViewerCreaseFacesGUI, (Halo2)))\
-			((collisionViewerLineWidthGUI, (Halo2)))\
-			((collisionViewerDepthPullGUI, (Halo2)))\
-			((collisionViewerRadiusGUI, (Halo2)))\
-			((collisionViewerHiddenAlphaGUI, (Halo2)))\
+			((collisionViewerGhostLogGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerCreasesGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerCreaseFacesGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerLineWidthGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerDepthPullGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerRadiusGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerHiddenAlphaGUI, (Halo2, Halo3, Halo3ODST)))\
 			((collisionViewerReversedZGUI, (Halo2)))
 
 

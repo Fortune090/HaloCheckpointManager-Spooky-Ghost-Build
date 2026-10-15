@@ -1095,7 +1095,7 @@ private:
 
 				case GUIElementEnum::collisionViewerToggleGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUIToggleWithChildren<GUIToggleWithChildrenParameters::ShowWhenTrue, false>>
-						(game, ToolTipCollection("Halo 2 (MCC 1.3528): collision wireframe sorted by type, Havok capsules, kill triggers, and a live overlay of Havok's per-polygon TIM values (the cached distance behind ghosting). Lines are depth-tested against the game's own scene, so your biped, AI and the gun hide them, and they never go through bloom."), std::nullopt, "Collision Viewer", settings->collisionViewerToggle, headerChildElements
+						(game, ToolTipCollection(std::string(game == GameState(GameState::Value::Halo2) ? "Halo 2 (MCC 1.3528): collision wireframe sorted by type, Havok capsules, kill triggers, and a live overlay of Havok's per-polygon TIM values (the cached distance behind ghosting). Lines are depth-tested against the game's own scene, so your biped, AI and the gun hide them, and they never go through bloom." : "Halo 3 / Halo 3: ODST (MCC 1.3528): the same collision wireframe and colour codes as Halo 2 (world BSP, invisible surfaces, breakables, instanced geometry, kill volumes, scenery / crates / machines), Havok 4.5 capsules, and a ghost / TIM debug view: the narrow phase caches a separating distance (w) per polygon; when w over-credits the real gap the polygon is skipped and you can ghost through it. Works in unmodded play. Lines are depth-tested against the game's scene at the first-person pass.")), std::nullopt, "Collision Viewer", settings->collisionViewerToggle, headerChildElements
 							{
 							createNestedElement(GUIElementEnum::collisionViewerOcclusionGUI),
 							createNestedElement(GUIElementEnum::collisionViewerShowBspGUI),
@@ -1106,6 +1106,7 @@ private:
 							createNestedElement(GUIElementEnum::collisionViewerShowCratesGUI),
 							createNestedElement(GUIElementEnum::collisionViewerShowMachinesGUI),
 							createNestedElement(GUIElementEnum::collisionViewerShowKillTriggersGUI),
+							createNestedElement(GUIElementEnum::collisionViewerShowSoftCeilingsGUI),
 							createNestedElement(GUIElementEnum::collisionViewerFillsGUI),
 							createNestedElement(GUIElementEnum::collisionViewerTimGUI),
 							createNestedElement(GUIElementEnum::collisionViewerTimLabelsGUI),
@@ -1115,6 +1116,7 @@ private:
 							createNestedElement(GUIElementEnum::collisionViewerGhostBelievedGUI),
 							createNestedElement(GUIElementEnum::collisionViewerGhostTrailGUI),
 							createNestedElement(GUIElementEnum::collisionViewerGhostRewindGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostJumpGUI),
 							createNestedElement(GUIElementEnum::collisionViewerGhostPrevGUI),
 							createNestedElement(GUIElementEnum::collisionViewerGhostHaloGUI),
 							createNestedElement(GUIElementEnum::collisionViewerGhostEdgesGUI),
@@ -1135,7 +1137,7 @@ private:
 
 				case GUIElementEnum::collisionViewerOcclusionGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUIComboEnum<SettingsEnums::CollisionViewerOcclusionEnum, 260.f>>
-						(game, ToolTipCollection("How lines are hidden behind the scene. InFrame_NoBloom: drawn inside the game's frame just before the first-person pass, against the game's own depth (your biped, AI, everything rendered hides them; the gun and HUD draw over them) - the game's bloom is switched off while shown, exactly like Cartographer's xlive overlay. PostBloom_KeepsBloom: world depth copied at the first-person pass, gun folded in, lines drawn after bloom. OwnCollisionDepth: drawn at Present against the viewer's own collision depth (automatic fallback in remastered graphics / menus). XRay: no occlusion."), "Occlusion", settings->collisionViewerOcclusion));
+						(game, ToolTipCollection("(Halo 3 / ODST: InFrame draws at the first-person pass against the game's depth, bloom is not touched; PostBloom is treated as OwnCollisionDepth.) How lines are hidden behind the scene. InFrame_NoBloom: drawn inside the game's frame just before the first-person pass, against the game's own depth (your biped, AI, everything rendered hides them; the gun and HUD draw over them) - the game's bloom is switched off while shown, exactly like Cartographer's xlive overlay. PostBloom_KeepsBloom: world depth copied at the first-person pass, gun folded in, lines drawn after bloom. OwnCollisionDepth: drawn at Present against the viewer's own collision depth (automatic fallback in remastered graphics / menus). XRay: no occlusion."), "Occlusion", settings->collisionViewerOcclusion));
 
 				case GUIElementEnum::collisionViewerShowBspGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
@@ -1200,6 +1202,14 @@ private:
 				case GUIElementEnum::collisionViewerGhostTrailGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
 						(game, ToolTipCollection("Havok's pose on each of the last 8 game ticks, fading; lime on ticks where a backstep was active. Rewinds show up as kinks."), std::nullopt, "  Tick trail", settings->collisionViewerGhostTrail));
+
+				case GUIElementEnum::collisionViewerShowSoftCeilingsGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("Halo 3 / ODST: the structure design soft ceilings (acceleration surfaces, soft kills, slip surfaces) of the loaded bsps, as pale-yellow triangle outlines."), std::nullopt, "Soft ceilings (pale yellow)", settings->collisionViewerShowSoftCeilings));
+
+				case GUIElementEnum::collisionViewerGhostJumpGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("Halo 3 / ODST: the last position JUMP. Halo 3's Havok integrates every step with centre-of-mass 0 := centre-of-mass 1 of the previous step, so a gap between them means the body was moved between two ticks by something other than the simulation - a raw position write (Force Teleport), or an engine path that skips the safe reposition. Yellow = where the next step started, red-orange = where the body was at the end of the previous step; the info panel says whether Halo's own object position moved with it."), std::nullopt, "  Jump markers (raw position writes)", settings->collisionViewerGhostJump));
 
 				case GUIElementEnum::collisionViewerGhostRewindGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
@@ -1278,21 +1288,21 @@ private:
 						(game, ToolTipCollection("Halo 2: fixes the player model and far scenery/instances flickering in and out when you move fast on big maps (e.g. Metropolis). The engine stops accepting render sections at 850 per frame and objects are added last, so they are what gets dropped; this raises the limit to 4096 by moving the per-section arrays into a bigger block. Applies live (it waits a moment for the renderer to pause; if it never does, nothing is changed and it says so) and stays on across level loads; turning it off restores the stock 850 (the cap drops at once; if the renderer is too busy to move the arrays back, that part finishes by itself at the next level load). Works alongside the baked halo2.dll builds - a baked dll that already includes this uncap is detected and left alone. Offline only. Halo 2 build 1.3528 only."), std::nullopt, "Uncap Render Sections", settings->uncapRenderSectionsToggle
 						));
 
-				case GUIElementEnum::h2ChaseCameraFovGUI:
+				case GUIElementEnum::chaseCameraFovGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUIFloat<SliderParam<float>(0.f, 150.f)>>
-						(game, ToolTipCollection("Field of view of the chase camera in degrees (0 = the game's own). Applied to the camera command the chase camera writes each frame; the game blends to it."), "  Chase FOV (deg, 0 = game)", settings->h2ChaseCameraFov));
+						(game, ToolTipCollection("Field of view of the chase camera in degrees (0 = the game's own). Applied to the camera command the chase camera writes each frame, so it only affects the chase camera while Chase Camera is on."), "  Chase FOV (deg, 0 = game)", settings->chaseCameraFov));
 
-				case GUIElementEnum::h2ChaseCameraHeightGUI:
+				case GUIElementEnum::chaseCameraHeightGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUIFloat<SliderParam<float>(-5.f, 10.f)>>
-						(game, ToolTipCollection("Raises (or lowers) the point the chase camera orbits around, in world units - the camera and what it looks at move up together."), "  Chase vertical offset (wu)", settings->h2ChaseCameraHeight));
+						(game, ToolTipCollection("Raises (or lowers) the point the chase camera orbits around, in world units - the camera and what it looks at move up together."), "  Chase vertical offset (wu)", settings->chaseCameraHeight));
 
-				case GUIElementEnum::h2ChaseCameraNoClipGUI:
+				case GUIElementEnum::chaseCameraNoClipGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("Chase Camera: don't pull the camera in when walls/objects are between it and you (sets the observer's own 'no camera collision' command flag). Only affects the chase camera while Chase Camera is on."), std::nullopt, "  No-clip camera", settings->h2ChaseCameraNoClip));
+						(game, ToolTipCollection("Chase Camera: don't pull the camera in when walls/objects are between it and you (sets the observer's own 'no camera collision' command flag). Only affects the chase camera while Chase Camera is on."), std::nullopt, "  No-clip camera", settings->chaseCameraNoClip));
 
-				case GUIElementEnum::h2ChaseCameraToggleGUI:
+				case GUIElementEnum::chaseCameraToggleGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<true>>
-						(game, ToolTipCollection("Halo 2: forces the engine's own attached third-person chase camera (the one it uses for vehicles with a third-person seat) while you are on foot. Switches with the engine's normal blend and goes straight back to first person when turned off. Aim follows the camera. Build 1.3528 only."), std::nullopt, "Chase Camera", settings->h2ChaseCameraToggle
+						(game, ToolTipCollection("Forces the engine's own third-person chase camera (the one it uses for vehicles) on you while you are on foot - Halo 2, Halo 3, Halo 3: ODST, Halo: Reach and Halo 4. Uses the game's own camera code and blend, and goes straight back to first person when turned off. Aim follows the camera. MCC build 1.3528 only. While Free Camera is on you see the free camera; the chase camera returns when Free Camera is turned off."), std::nullopt, "Chase Camera", settings->chaseCameraToggle
 						));
 
 				case GUIElementEnum::h2ArmorColourToggle:
@@ -2917,10 +2927,10 @@ private:
 							createNestedElement(GUIElementEnum::hceFieldOfViewSpeedGUI),
 							createNestedElement(GUIElementEnum::hceFieldOfViewResetGUI),
 							createNestedElement(GUIElementEnum::freeCameraToggleGUI),
-							createNestedElement(GUIElementEnum::h2ChaseCameraToggleGUI),
-							createNestedElement(GUIElementEnum::h2ChaseCameraNoClipGUI),
-							createNestedElement(GUIElementEnum::h2ChaseCameraFovGUI),
-							createNestedElement(GUIElementEnum::h2ChaseCameraHeightGUI),
+							createNestedElement(GUIElementEnum::chaseCameraToggleGUI),
+							createNestedElement(GUIElementEnum::chaseCameraNoClipGUI),
+							createNestedElement(GUIElementEnum::chaseCameraFovGUI),
+							createNestedElement(GUIElementEnum::chaseCameraHeightGUI),
 							createNestedElement(GUIElementEnum::freeCameraSettingsSimpleSubheading),
 							createNestedElement(GUIElementEnum::freeCameraSettingsAdvancedSubheading),
 							createNestedElement(GUIElementEnum::changeOOBBackgroundToggle),

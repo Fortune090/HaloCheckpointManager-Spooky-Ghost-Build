@@ -106,7 +106,7 @@
 #include "UncapClusterLimit.h"
 #include "UncapRenderSections.h"
 #include "CollisionViewer.h"
-#include "H2ChaseCamera.h"
+#include "ChaseCamera.h"
 #include "FarClipDistance.h"
 #include "SunScaleFix.h"
 #include "AnimationFixes.h"

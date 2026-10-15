@@ -711,6 +711,14 @@ const std::map <GUIElementEnum, std::vector<OptionalCheatEnum>> GUIRequiredServi
 		{OptionalCheatEnum::CollisionViewer}
 	},
 
+	{ GUIElementEnum::collisionViewerShowSoftCeilingsGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerGhostJumpGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
 	{ GUIElementEnum::collisionViewerGhostPrevGUI,
 		{OptionalCheatEnum::CollisionViewer}
 	},
@@ -787,20 +795,20 @@ const std::map <GUIElementEnum, std::vector<OptionalCheatEnum>> GUIRequiredServi
 		{OptionalCheatEnum::H2ShadowResolution}
 	},
 
-	{ GUIElementEnum::h2ChaseCameraToggleGUI,
-		{OptionalCheatEnum::H2ChaseCamera}
+	{ GUIElementEnum::chaseCameraToggleGUI,
+		{OptionalCheatEnum::ChaseCamera}
 	},
 
-	{ GUIElementEnum::h2ChaseCameraNoClipGUI,
-		{OptionalCheatEnum::H2ChaseCamera}
+	{ GUIElementEnum::chaseCameraNoClipGUI,
+		{OptionalCheatEnum::ChaseCamera}
 	},
 
-	{ GUIElementEnum::h2ChaseCameraFovGUI,
-		{OptionalCheatEnum::H2ChaseCamera}
+	{ GUIElementEnum::chaseCameraFovGUI,
+		{OptionalCheatEnum::ChaseCamera}
 	},
 
-	{ GUIElementEnum::h2ChaseCameraHeightGUI,
-		{OptionalCheatEnum::H2ChaseCamera}
+	{ GUIElementEnum::chaseCameraHeightGUI,
+		{OptionalCheatEnum::ChaseCamera}
 	},
 
 	{ GUIElementEnum::h2ArmorColourToggle,

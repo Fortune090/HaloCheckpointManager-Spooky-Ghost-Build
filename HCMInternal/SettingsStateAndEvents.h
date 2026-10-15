@@ -946,33 +946,33 @@ public:
 			nameof(collisionViewerToggle)
 		);
 
-	// Halo 2 chase camera (H2ChaseCamera). A cheat toggle: NOT in allSerialisableOptions, always starts off.
-	std::shared_ptr<BinarySetting<bool>> h2ChaseCameraToggle = std::make_shared<BinarySetting<bool>>
+	// Chase camera (ChaseCamera; Halo 2 / 3 / ODST / Reach / 4 share these four). A cheat toggle: NOT in allSerialisableOptions, always starts off.
+	std::shared_ptr<BinarySetting<bool>> chaseCameraToggle = std::make_shared<BinarySetting<bool>>
 		(
 			false,
 			[](bool in) { return true; },
-			nameof(h2ChaseCameraToggle)
+			nameof(chaseCameraToggle)
 		);
 
-	std::shared_ptr<BinarySetting<bool>> h2ChaseCameraNoClip = std::make_shared<BinarySetting<bool>>
+	std::shared_ptr<BinarySetting<bool>> chaseCameraNoClip = std::make_shared<BinarySetting<bool>>
 		(
 			true,
 			[](bool in) { return true; },
-			nameof(h2ChaseCameraNoClip)
+			nameof(chaseCameraNoClip)
 		);
 
-	std::shared_ptr<BinarySetting<float>> h2ChaseCameraFov = std::make_shared<BinarySetting<float>>
+	std::shared_ptr<BinarySetting<float>> chaseCameraFov = std::make_shared<BinarySetting<float>>
 		(
 			0.f,
 			[](float in) { return in >= 0.f && in <= 150.f; },
-			nameof(h2ChaseCameraFov)
+			nameof(chaseCameraFov)
 		);
 
-	std::shared_ptr<BinarySetting<float>> h2ChaseCameraHeight = std::make_shared<BinarySetting<float>>
+	std::shared_ptr<BinarySetting<float>> chaseCameraHeight = std::make_shared<BinarySetting<float>>
 		(
 			0.f,
 			[](float in) { return in >= -5.f && in <= 10.f; },
-			nameof(h2ChaseCameraHeight)
+			nameof(chaseCameraHeight)
 		);
 
 	std::shared_ptr<BinarySetting<SettingsEnums::CollisionViewerOcclusionEnum>> collisionViewerOcclusion = std::make_shared<BinarySetting<SettingsEnums::CollisionViewerOcclusionEnum>>
@@ -1099,6 +1099,22 @@ public:
 			false,
 			[](bool in) { return true; },
 			nameof(collisionViewerGhostRewind)
+		);
+
+	// Halo 3 / ODST ghost debug: the last JUMP (com0 of a step differs from com1 of the previous one = a raw position write)
+	// Halo 3 / ODST: soft ceilings / soft kills / slip surfaces of the loaded structure bsps (off by default)
+	std::shared_ptr<BinarySetting<bool>> collisionViewerShowSoftCeilings = std::make_shared<BinarySetting<bool>>
+		(
+			false,
+			[](bool in) { return true; },
+			nameof(collisionViewerShowSoftCeilings)
+		);
+
+	std::shared_ptr<BinarySetting<bool>> collisionViewerGhostJump = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerGhostJump)
 		);
 
 	std::shared_ptr<BinarySetting<bool>> collisionViewerGhostPrev = std::make_shared<BinarySetting<bool>>

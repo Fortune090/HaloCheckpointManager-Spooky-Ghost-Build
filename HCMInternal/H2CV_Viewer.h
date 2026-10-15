@@ -3,11 +3,14 @@
 #include <dxgi.h>
 #include <atomic>
 #include <deque>
+#include <mutex>
 #include <cstdint>
 #include <string>
 #include <vector>
 #include "H2CV_Collision.h"
 #include "H2CV_Renderer.h"
+#include "H2CV_Engine.h"
+#include "H2CV_Halo3.h"
 
 namespace h2cv
 {
@@ -45,6 +48,7 @@ namespace h2cv
 		std::atomic_bool ghostHalo{ true };             // (c) Halo's own object position
 		std::atomic_bool ghostTrail{ true };            // (d) last N ticks of Havok poses            [End]
 		std::atomic_bool ghostRewind{ true };           // (e/g) backstep rewind target + pre-rewind pose
+		std::atomic_bool ghostJump{ true };             // Halo 3 / ODST: last jump (com0 != previous com1) markers
 		std::atomic_bool ghostBelieved{ true };         // (f) poses the over-credited TIMs believe     [Shift+Home]
 		std::atomic_bool ghostEdges{ true };            // lime/red edges of skipped / over-credited polygons [Shift+End]
 		std::atomic_bool ghostEdgesSuspectOnly{ false };// false = every skipped child (TIM>0), true = only stale / over-credited ones
@@ -82,6 +86,10 @@ namespace h2cv
 		// called from HCM's ForegroundDirectXRenderEvent: inside Present, ImGui frame open, HCM's UI not drawn yet
 		void onRender(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t w, uint32_t h);
 		void onFirstPersonPass(); // engine hook: entry of sub_1807E0C60 (render thread)
+		// Halo 3 / ODST: engine hook at the entry of the first-person pass (view = rcx, opaque = dl == 0; render thread) and the
+		// per-tick callback from the simulation thread (HCM's game tick event) that samples the player's Havok state
+		void onFirstPersonPass3(uintptr_t view, bool opaquePass);
+		void onSimTick(uint32_t tick);
 		void onResolveDone();     // engine hook: exit of sub_180951EC0 (bloom + composite done, HUD not yet)
 		void restoreBloom();      // put the game's bloom gate back (unload / mode change)
 		void beforeResize();
@@ -97,6 +105,54 @@ namespace h2cv
 		void drawPills();
 		void drawGhost();
 		void drawHud(const h2::Camera& cam);
+
+		// ---- Halo 3 / ODST (Viewer3.cpp) ----
+		void drawTim3();
+		void drawPills3();
+		void drawGhost3();
+		void drawHud3();
+		void bipedOccluders3(std::vector<Tri>& caps, const h2::Vec3& camPos);
+		h2::Camera camera3();
+		void pumpGhost3();                     // move new per-tick samples (sim thread queue, else a live sample) into the analysis state
+		struct Frame3 { bool have = false; h2::GameFrame f; D3D11_VIEWPORT vp{}; uint32_t presentIdx = 0; uint32_t user = 0; };
+		Frame3 mF3;
+		bool mLogged3 = false; uint32_t mBad3 = 0; std::string mNote3;
+		std::mutex mSimMu;
+		std::deque<h3::Ghost3> mSimQ;          // per-tick samples of user 0 (sim thread pushes, render thread consumes)
+		std::atomic<uint64_t> mSimLastMs{ 0 };
+		std::atomic_bool mWantSim3{ false };
+		struct Sample3 { uint32_t tick = 0; h2::Vec3 com0{}, com1{}; h2::Xf pose; };
+		struct GhostPlayer3
+		{
+			uintptr_t body = 0; uint32_t lastTick = 0; bool have = false;
+			h2::Vec3 lastCom1{}, lastHalo{}; bool lastHaloOk = false;
+			std::deque<Sample3> trail;
+			bool haveJump = false; uint32_t jumpTick = 0; h2::Vec3 jumpFrom{}, jumpTo{}; float jumpDist = 0; bool jumpHalo = false; uint32_t jumps = 0;
+			bool havePair = false; bool pairDumped = false;
+			h3::Ghost3 latest; bool haveLatest = false;
+		};
+		GhostPlayer3 mGP3;
+		struct Row3 { uint32_t key; int cat; int bsp; uint32_t inst, surf; float w, trueDist, over; int age; bool hasTim, skipped, touching, stale; };
+		struct GhostInfo3
+		{
+			bool valid = false; std::string note, detail;
+			int pairs = 0, kids = 0, tims = 0, skipped = 0, touchSkipped = 0, overcredited = 0, believed = 0;
+			float maxOver = 0, tol = 0, dHalo = 0, stepMove = 0; bool lime = false, red = false;
+			bool layoutOk = false; int bsp = -1; uint32_t sims = 0;
+		};
+		GhostInfo3 mGI3;
+		std::vector<Row3> mRows3;
+		// per-child analysis of the latest sample (Viewer3.cpp analyse3): polygon, true gap, over-credit / stale flags
+		struct An3
+		{
+			const h3::Pair3* pair = nullptr; const h3::Tim3* k = nullptr;
+			int cat = -1; uint32_t inst = 0, surf = 0; int bsp = -1;
+			bool havePoly = false; std::vector<h2::Vec3> poly;
+			float trueDist = 1e9f, over = 0; bool validTime = false, skipped = false, touching = false, stale = false, overcredit = false; int age = 0;
+		};
+		std::vector<An3> mAn3;
+		uint32_t mPumped3 = 0;
+		void analyse3();
 
 		ID3D11Device* mDev = nullptr;
 		ID3D11DeviceContext* mCtx = nullptr;

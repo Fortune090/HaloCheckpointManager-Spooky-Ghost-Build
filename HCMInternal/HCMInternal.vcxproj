@@ -425,7 +425,7 @@ IF EXIST "C:\Program Files\LockHunter\LockHunter.exe"  (
     <ClInclude Include="UncapClusterLimit.h" />
     <ClInclude Include="UncapRenderSections.h" />
     <ClInclude Include="CollisionViewer.h" />
-    <ClInclude Include="H2ChaseCamera.h" />
+    <ClInclude Include="ChaseCamera.h" />
     <ClInclude Include="H2CV_Log.h" />
     <ClInclude Include="H2CV_Mem.h" />
     <ClInclude Include="H2CV_Halo2.h" />
@@ -433,6 +433,9 @@ IF EXIST "C:\Program Files\LockHunter\LockHunter.exe"  (
     <ClInclude Include="H2CV_TimKeys.h" />
     <ClInclude Include="H2CV_Renderer.h" />
     <ClInclude Include="H2CV_Viewer.h" />
+    <ClInclude Include="H2CV_Engine.h" />
+    <ClInclude Include="H2CV_Halo3.h" />
+    <ClInclude Include="H2CV_ViewerUtil.h" />
     <ClInclude Include="UncapRenderSectionsTable.h" />
     <ClInclude Include="FarClipDistance.h" />
     <ClInclude Include="HavokDebugger.h" />
@@ -840,11 +843,15 @@ IF EXIST "C:\Program Files\LockHunter\LockHunter.exe"  (
     <ClCompile Include="UncapClusterLimit.cpp" />
     <ClCompile Include="UncapRenderSections.cpp" />
     <ClCompile Include="CollisionViewer.cpp" />
-    <ClCompile Include="H2ChaseCamera.cpp" />
+    <ClCompile Include="ChaseCamera.cpp" />
     <ClCompile Include="H2CV_Halo2.cpp" />
     <ClCompile Include="H2CV_Collision.cpp" />
     <ClCompile Include="H2CV_Renderer.cpp" />
     <ClCompile Include="H2CV_Viewer.cpp" />
+    <ClCompile Include="H2CV_Engine.cpp" />
+    <ClCompile Include="H2CV_Halo3.cpp" />
+    <ClCompile Include="H2CV_Collision3.cpp" />
+    <ClCompile Include="H2CV_Viewer3.cpp" />
     <ClCompile Include="FarClipDistance.cpp" />
     <ClCompile Include="HavokDebugger.cpp" />
     <ClCompile Include="HavokDebuggerImpl.cpp">

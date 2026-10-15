@@ -17,6 +17,22 @@ namespace h2cv
 		uint32_t instance = 0, surface = 0;
 	};
 
+	// Halo 3 / ODST environment shape keys (getChildShape sub_18021CF6C): key >> 29 = category:
+	//   1 world surface (key & 0x3FFFFFF in the shape's own structure bsp), 2 a whole instanced-geometry instance (key & 0xFFFF),
+	//   3 instanced-geometry surface (instance key & 0xFFFF, surface (key >> 16) & 0x1FFF)
+	inline KeyInfo decodeKey3(uint32_t key)
+	{
+		KeyInfo k;
+		k.category = (int)(key >> 29);
+		switch (k.category)
+		{
+		case 1: k.kind = KeyInfo::WorldPolygon; k.surface = key & 0x3FFFFFF; break;
+		case 3: k.kind = KeyInfo::IgPolygon; k.instance = key & 0xFFFF; k.surface = (key >> 16) & 0x1FFF; break;
+		default: k.kind = KeyInfo::Other; k.instance = key & 0xFFFF; break;
+		}
+		return k;
+	}
+
 	inline KeyInfo decodeKey(uint32_t key)
 	{
 		KeyInfo k;

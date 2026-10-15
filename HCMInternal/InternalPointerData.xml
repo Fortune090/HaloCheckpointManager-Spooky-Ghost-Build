@@ -12766,21 +12766,92 @@
 	</VersionedEntry>
 
 
-	<!-- halo2.dll sub_1806D4C50: director "should this unit use the following (chase) camera?" predicate. int(uint unitIndex, short* perspectiveCode). -->
-	<VersionedEntry Name="h2ChaseCameraPredicateFunction" Type="MultilevelPointer::ModuleOffset">
+	<!-- ChaseCamera (MCC 1.3528.0.0 only; the prologue of both functions is also byte-checked before hooking).
+	     chaseCameraSelectFunction = the function that CHOOSES the camera for the local player:
+	       halo2.dll     sub_1806D4C50  predicate int(uint unitIndex, short* perspectiveCode): "should this unit use the following camera?"
+	       halo3.dll     0x131B40, halo3odst.dll 0x15298C  director_set_perspective(dir, int code, float blend, bool force): code 1 (first person) -> 0 (follow)
+	       haloreach.dll 0xC5834, halo4.dll 0x10BD98       director_set_camera_mode(dir, int mode, float blend, bool force): mode 3 (first person) -> 1 (following)
+	     chaseCameraFollowFunction = the FOLLOWING camera's update, which writes the observer command (flags @+0, focus @+4..+0xC, FOV radians @+0x28):
+	       halo2.dll sub_18077C9F0, halo3.dll 0x213CF4, halo3odst.dll 0x244118, haloreach.dll 0x1DE658, halo4.dll 0x29493C
+	     A game with no entry here simply has no Chase Camera (its GUI rows grey out). -->
+	<VersionedEntry Name="chaseCameraSelectFunction" Type="MultilevelPointer::ModuleOffset">
 		<Version Version="1.3528.0.0" Game="Halo2">
 			<Module>halo2.dll</Module>
 			<Offsets>
 				<Offset>0x6D4C50</Offset>
 			</Offsets>
 		</Version>
+		<Version Version="1.3528.0.0" Game="Halo3">
+			<Module>halo3.dll</Module>
+			<Offsets>
+				<Offset>0x131B40</Offset>
+			</Offsets>
+		</Version>
+		<Version Version="1.3528.0.0" Game="Halo3ODST">
+			<Module>halo3odst.dll</Module>
+			<Offsets>
+				<Offset>0x15298C</Offset>
+			</Offsets>
+		</Version>
+		<Version Version="1.3528.0.0" Game="HaloReach">
+			<Module>haloreach.dll</Module>
+			<Offsets>
+				<Offset>0xC5834</Offset>
+			</Offsets>
+		</Version>
+		<Version Version="1.3528.0.0" Game="Halo4">
+			<Module>halo4.dll</Module>
+			<Offsets>
+				<Offset>0x10BD98</Offset>
+			</Offsets>
+		</Version>
 	</VersionedEntry>
-	<!-- halo2.dll sub_18077C9F0: following (chase) camera update = director camera mode pointer; writes the observer command (flags @+0). -->
-	<VersionedEntry Name="h2ChaseCameraFollowUpdateFunction" Type="MultilevelPointer::ModuleOffset">
+	<VersionedEntry Name="chaseCameraFollowFunction" Type="MultilevelPointer::ModuleOffset">
 		<Version Version="1.3528.0.0" Game="Halo2">
 			<Module>halo2.dll</Module>
 			<Offsets>
 				<Offset>0x77C9F0</Offset>
+			</Offsets>
+		</Version>
+		<Version Version="1.3528.0.0" Game="Halo3">
+			<Module>halo3.dll</Module>
+			<Offsets>
+				<Offset>0x213CF4</Offset>
+			</Offsets>
+		</Version>
+		<Version Version="1.3528.0.0" Game="Halo3ODST">
+			<Module>halo3odst.dll</Module>
+			<Offsets>
+				<Offset>0x244118</Offset>
+			</Offsets>
+		</Version>
+		<Version Version="1.3528.0.0" Game="HaloReach">
+			<Module>haloreach.dll</Module>
+			<Offsets>
+				<Offset>0x1DE658</Offset>
+			</Offsets>
+		</Version>
+		<Version Version="1.3528.0.0" Game="Halo4">
+			<Module>halo4.dll</Module>
+			<Offsets>
+				<Offset>0x29493C</Offset>
+			</Offsets>
+		</Version>
+	</VersionedEntry>
+	<!-- CollisionViewer (Halo 3 / ODST, MCC 1.3528.0.0 only): the per-view FIRST-PERSON PASS, sub_1802835D4(view, a2) in halo3.dll / sub_1802AC2E4 in halo3odst.dll.
+	     Entered with a2 == 0 for the opaque pass: the world depth is complete (incl. the biped), the gun / HUD are not drawn yet. The detour draws the collision
+	     lines into the bound scene targets with the view's own matrices (view+152). The prologue is byte-checked before hooking. -->
+	<VersionedEntry Name="collisionViewerFirstPersonPass" Type="MultilevelPointer::ModuleOffset">
+		<Version Version="1.3528.0.0" Game="Halo3">
+			<Module>halo3.dll</Module>
+			<Offsets>
+				<Offset>0x2835D4</Offset>
+			</Offsets>
+		</Version>
+		<Version Version="1.3528.0.0" Game="Halo3ODST">
+			<Module>halo3odst.dll</Module>
+			<Offsets>
+				<Offset>0x2AC2E4</Offset>
 			</Offsets>
 		</Version>
 	</VersionedEntry>
