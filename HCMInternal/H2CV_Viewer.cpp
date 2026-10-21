@@ -543,8 +543,24 @@ namespace h2cv
 		if (!settings.ghostLog) mLogPath.clear();          // re-enabling opens a fresh file
 		const bool logOn = settings.ghostLog && logEnsureOpen();
 		const std::string lvl = logOn ? eng::levelCode() : std::string();
-		const int offsetReq = mOffsetReq.exchange(0);       // 1 save, 2 load (offset save state)
+		int offsetReq = mOffsetReq.exchange(0);             // 1 save, 2 load (offset save state)
 		bool offsetFireCheckpoint = false, offsetFireRevert = false;
+		// Load does not need a living player: while you are dead (no unit, no pairs) the revert is fired right here instead
+		// of waiting for the death sequence, and the TIMs are written back once you are standing at the checkpoint again.
+		if (offsetReq == 2)
+		{
+			const int u = 0;
+			if (!mOffsetSlot[u].valid) { mOffsetStatus = "Offset load: nothing saved yet."; if (message) message(mOffsetStatus); }
+			else
+			{
+				OffsetRun& run = mOffsetRun[u];
+				run = OffsetRun{}; run.phase = OffsetPhase::WaitRebuild; run.isLoad = true; run.reqTick = tick;
+				run.done.assign(mOffsetSlot[u].e.size(), false);
+				mOffsetStatus = "Offset load: revert requested";
+				offsetFireRevert = true;
+			}
+			offsetReq = 0;
+		}
 
 		for (int u = 0; u < 4; ++u)
 		{
@@ -1649,6 +1665,83 @@ namespace h2cv
 		(void)I;
 	}
 
+	// ---- kill volumes --------------------------------------------------------------------------------------------
+	// Every kill volume's box (red = live, grey = disabled by script). The one(s) you are inside are drawn heavy with a
+	// countdown to the tick the game will test them: per tick it tests ONE volume per object,
+	//     i = (game_time + (object_index & 0xFFFF)) % count          (sub_18075F620)
+	// so inside volume k you die after (k - game_time - object_index) mod count ticks.
+	void Viewer::drawKillVolumes()
+	{
+		mKill = KillStats{};
+		// out-of-bounds timer (independent of kill volumes): on-screen countdown while it is running
+		mKill.oob = h2::readOobTimer(0);
+		// the death bar shows whichever kill comes first: the out-of-bounds count (16 ticks once it starts) or the turn of a
+		// kill volume you are inside (its check comes round every `count` ticks); worked out at the end of this function
+		mOobBar = -1.f; mOobBarText[0] = 0;
+		int bestTicks = INT32_MAX; float bestFrac = -1.f;
+		auto offer = [&](int ticksLeft, int period, const char* what)
+		{
+			if (ticksLeft < 0 || period <= 0 || ticksLeft >= bestTicks) return;
+			bestTicks = ticksLeft;
+			bestFrac = std::clamp((float)ticksLeft / (float)period, 0.f, 1.f);
+			snprintf(mOobBarText, sizeof(mOobBarText), "%s - %d ticks", what, ticksLeft);
+		};
+		auto publishBar = [&]() { mOobBar = bestFrac; if (bestFrac < 0.f) mOobBarText[0] = 0; };
+		if (mKill.oob.valid && mKill.oob.counter > 0)
+		{
+			const int total = mKill.oob.limit + 1;
+			offer(total - mKill.oob.counter, total, "OUT OF BOUNDS");
+		}
+		std::vector<h2::KillVolume> kvs;
+		if (!h2::readKillVolumes(kvs)) { mKill.note = "scenario not readable"; publishBar(); return; }
+		mKill.count = (int)kvs.size();
+		if (kvs.empty()) { mKill.note = "this map has no kill volumes"; mKill.valid = true; publishBar(); return; }
+		const uint32_t tick = h2::gameTick();
+		const uint32_t unitDatum = h2::localPlayerUnitDatum(0);
+		const uintptr_t unit = unitDatum != 0xFFFFFFFF ? h2::objectFromDatum(unitDatum) : 0;
+		const uint32_t objIndex = unitDatum & 0xFFFF;
+		const int n = (int)kvs.size();
+		mKill.valid = true; mKill.tick = tick; mKill.objIndex = objIndex;
+		mKill.checking = unit ? (int)((tick + objIndex) % (uint32_t)n) : -1;
+		// the point the game tests (object +0x30)
+		Vec3 P{}; const bool haveP = unit && h2::killTestPoint(unit, P);
+
+		// no boxes are drawn (the Collision Viewer's own trigger / kill volume display covers that): this only works out
+		// which volumes you are inside and when the rotation reaches them, for the info panel
+		for (int k = 0; k < n; ++k)
+		{
+			const h2::KillVolume& kv = kvs[k];
+			if (kv.enabled) ++mKill.enabled;
+			if (kv.attached) { ++mKill.attached; continue; }
+			if (kv.trigger < 0) continue;
+			// inside? ask the game itself (the same test the kill check calls); our own box math is the fallback and a
+			// cross-check shown in the panel
+			bool boxInside = false;
+			if (haveP)
+			{
+				const Vec3 d = sub(P, kv.pos);
+				const float x = dot(d, kv.fwd), y = dot(d, kv.left), z = dot(d, kv.up);
+				boxInside = x > 0 && y > 0 && z > 0 && x < kv.ext.x && y < kv.ext.y && z < kv.ext.z;
+			}
+			const int game = unit ? h2::gameTriggerVolumeTest(kv.trigger, unitDatum) : 0;
+			const bool inside = game >= 0 ? game == 1 : boxInside;
+			if (game == 1 && !boxInside) ++mKill.boxDisagree;
+			if (game == 0 && boxInside) ++mKill.boxDisagree;
+			if (game < 0) mKill.gameTestFailed = true;
+			if (inside && !kv.enabled) mKill.insideDisabled.push_back(k);
+			int ticks = -1;
+			if (inside && kv.enabled)
+			{
+				const int64_t r = ((int64_t)k - (int64_t)tick - (int64_t)objIndex) % n;
+				ticks = (int)(r < 0 ? r + n : r);
+				mKill.inside.push_back({ k, ticks });
+				char what[32]; snprintf(what, sizeof(what), "KILL VOLUME #%d", k);
+				offer(ticks, n, what);
+			}
+		}
+		publishBar();
+	}
+
 	void Viewer::drawTim()
 	{
 		mTimRows.clear(); mPairFound = false; mPairWelder = false;
@@ -1734,8 +1827,10 @@ namespace h2cv
 		if (ImGui::Begin("Collision Viewer##h2cv", nullptr, ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_AlwaysAutoResize |
 			ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav))
 		{
-			ImGui::Text("occlusion: %s", occlusionName((Occlusion)settings.occlusion.load()));
 			if (!mInFrameNote.empty()) ImGui::TextColored(ImVec4(1, 0.75f, 0.2f, 1), "%s", mInFrameNote.c_str());
+			if (settings.infoGeneral)
+			{
+			ImGui::Text("occlusion: %s", occlusionName((Occlusion)settings.occlusion.load()));
 			ImGui::Text("width %.1fpx  pull %.4f  hidden %.2f  radius %.0f",
 				settings.lineWidth.load(), settings.pull.load(), settings.hiddenAlpha.load(), settings.nearRadius.load());
 			for (int c = 0; c < (int)Cat::SoftCeiling; ++c)   // soft ceilings are a Halo 3 / ODST category
@@ -1746,9 +1841,13 @@ namespace h2cv
 				if (c % 3 != 2 && c != (int)Cat::SoftCeiling - 1) ImGui::SameLine();
 			}
 			ImGui::Separator();
+			}
+			if (settings.infoTim)
+			{
 			ImGui::Text("TIM overlay %s  labels %s  capsules %s", settings.tim ? "on" : "off",
 				settings.timLabels ? "on" : "off", settings.pills ? "on" : "off");
-			if (settings.tim)
+			}
+			if (settings.tim && settings.infoTim)
 			{
 				ImGui::Text("player<->level pair: %s  S = %d  tick %u  (%s)", mPairFound ? "found" : "-", mPairS, mTick, mStatus.c_str());
 				if (!mTimRows.empty() && ImGui::BeginTable("tim", 6, ImGuiTableFlags_SizingFixedFit))
@@ -1775,14 +1874,18 @@ namespace h2cv
 					ImGui::EndTable();
 				}
 			}
+			if (settings.infoGhost)
+			{
 			ImGui::Separator();
 			ImGui::Text("GHOST debug [Home] %s  believed poses [Shift+Home] %s  objects %s  trail [End] %s  skipped edges [Shift+End] %s",
 				settings.ghost ? "on" : "off", settings.ghostBelieved ? "on" : "off", settings.ghostBelievedObjects ? "on" : "off", settings.ghostTrail ? "on" : "off", settings.ghostEdges ? "on" : "off");
-			if (settings.ghost)
+			}
+			if (settings.ghost && settings.infoGhost)
 			{
-				auto objectsLine = [](const GhostInfo& g)
+				const bool showObjects = settings.infoGhostObjects;
+				auto objectsLine = [showObjects](const GhostInfo& g)
 				{
-					if (!g.objScanned) return;
+					if (!showObjects || !g.objScanned) return;
 					ImGui::TextColored(g.nObjSuspect > 0 ? ImVec4(1, 0.63f, 0, 1) : ImVec4(0.8f, 0.8f, 0.8f, 1),
 						"    objects: %d body pairs%s, %d baked scenery children (%d unresolved), %d TIM leaves  skipped %d/%d  suspect %d  max over-credit %.4f wu  believed %d",
 						g.nObjPairs, g.vehicle ? " (biped only)" : "", g.nObjBaked, g.nObjBakedFail, g.nObjLeaves, g.nObjSkipped, g.nObjTims, g.nObjSuspect, g.maxObjOver, g.nObjBelieved);
@@ -1805,6 +1908,8 @@ namespace h2cv
 						g.user, g.subject.c_str(), g.S, g.hold && g.S <= 0 ? " (backstep hold)" : "", g.nSkipped, g.nChildren, g.nSuspect, g.maxOver, g.nBelieved);
 					if (g.vehicle) ImGui::TextDisabled("    vehicle body: %d primitives, %d welder leaves with TIMs", g.nPrims, g.nWelders);
 					objectsLine(g);
+					if (settings.infoGhostDetails)
+					{
 					ImGui::Text("    Havok-Halo: %.4f wu (vs %s; origin %.4f, COM %.4f, COM offset %.4f)   step-start delta %.4f wu",
 						g.haloRefCom ? g.dCom : g.dOrigin, g.haloRefCom ? "COM" : "origin", g.dOrigin, g.dCom, g.comOff, g.prevDelta);
 					if (g.rewindAge >= 0) ImGui::Text("    last rewind %.4f wu, t*=%.2f (f = %.2f of the step undone), %d ticks ago   (g = rewind target %s)", g.rewindDist, g.tStar, 1.f - g.tStar, g.rewindAge,
@@ -1812,25 +1917,29 @@ namespace h2cv
 					else ImGui::Text("    no rewind seen yet   (g = step-start pose)");
 					if (!g.detail.empty()) ImGui::TextDisabled("    %s", g.detail.c_str());
 					if (!g.note.empty()) ImGui::TextDisabled("    %s", g.note.c_str());
+					}
 					if (g.user == 0 && !mOffsetStatus.empty()) ImGui::TextColored(ImVec4(0.55f, 0.85f, 1.f, 1.f), "    %s", mOffsetStatus.c_str());
-					if (settings.ghostPass && (g.nPassLevel || g.nPassObj))
+					if (settings.ghostPass && settings.infoPass && (g.nPassLevel || g.nPassObj))
 						ImGui::TextColored(ImVec4(0.13f, 1.f, 0.25f, 1.f), "    PASS-THROUGH: %d polygon(s), %d object piece(s) - TIM left over by up to %.3f wu", g.nPassLevel, g.nPassObj, g.passBest);
-					if (settings.ghostPass) for (const auto& r : g.passRows) ImGui::TextDisabled("      pass test %s", r.c_str());
-					if (!g.travel.empty())
+					if (settings.ghostPass && settings.infoPass) for (const auto& r : g.passRows) ImGui::TextDisabled("      pass test %s", r.c_str());
+					if (settings.infoTravel && !g.travel.empty())
 					{
 						ImGui::TextColored(ImVec4(1, 0.85f, 0.2f, 1), "    TRAVEL REGION (level): keep the white cross (your centre) inside each coloured box and short of its red sheet");
 						for (const auto& r : g.travel) ImGui::Text("      %s", r.c_str());
 					}
-					if (!g.travelObj.empty())
+					if (settings.infoTravel && !g.travelObj.empty())
 					{
 						ImGui::TextColored(ImVec4(1, 0.63f, 0, 1), "    TRAVEL REGION (objects): same rules; pairs use the broadphase boxes, tolerance %.4f wu", g.tolerance);
 						for (const auto& r : g.travelObj) ImGui::Text("      %s", r.c_str());
 					}
 				}
+				if (settings.infoLegend)
+				{
 				ImGui::TextDisabled("pink = no backstep   LIME = S>0 / hold / stale or over-credited child   RED = S=-3   white = Halo position   yellow = rewind target   red-orange = pre-rewind   orange = believed vs object");
 				ImGui::TextDisabled("seated in a vehicle (any seat) the view follows the VEHICLE's Havok body [%s]; on exit it returns to the biped", settings.ghostVehicles ? "on" : "off");
+				}
 			}
-			if (settings.ghost || settings.weldZonesNear || settings.weldZonesWelded)
+			if (settings.infoGrids && (settings.ghost || settings.weldZonesNear || settings.weldZonesWelded))
 			{
 				h2::LevelGrids lg;
 				if (h2::levelGrids(lg))
@@ -1857,7 +1966,42 @@ namespace h2cv
 					else ImGui::TextDisabled("    level MOPP: not found");
 				}
 			}
-			if (settings.weldZonesNear || settings.weldZonesWelded)
+			if (settings.infoKill)
+			{
+				// the out-of-bounds timer is read here on its own, so the panel shows it even with the kill volume overlay off
+				ImGui::Separator();
+				const h2::OobTimer oob = h2::readOobTimer(0);
+				if (oob.valid)
+				{
+					if (oob.counter > 0)
+						ImGui::TextColored(ImVec4(0.47f, 0.86f, 1.f, 1.f), "OUT OF BOUNDS (your body is inside solid / outside the level): %d of %d ticks - killed in %d ticks (%.2f s)",
+							oob.counter, oob.limit + 1, oob.limit + 1 - oob.counter, (oob.limit + 1 - oob.counter) / (float)oob.ticksPerSec);
+					else
+						ImGui::TextDisabled("OUT OF BOUNDS: not counting. The check starts only on ticks where (tick + player index %u) %% 16 == 0 - next in %d ticks; then %d ticks in a row kill",
+							oob.playerIndex, oob.nextCheck, oob.limit + 1);
+				}
+				else ImGui::TextDisabled("OUT-OF-BOUNDS TIMER: no local player");
+			}
+			if (settings.infoKill && !settings.killVolumes)
+				ImGui::TextDisabled("KILL VOLUMES: turn on 'Out-of-bounds timer bar' to list the kill volume rotation");
+			if (settings.killVolumes && settings.infoKill)
+			{
+				if (!mKill.valid) ImGui::TextDisabled("KILL VOLUMES: %s", mKill.note.c_str());
+				else if (mKill.count == 0) ImGui::TextDisabled("KILL VOLUMES: %s", mKill.note.c_str());
+				else
+				{
+					ImGui::Text("KILL VOLUMES: %d (%d enabled%s)   one checked per tick: #%d this tick (tick %u + object index %u, mod %d)",
+						mKill.count, mKill.enabled, mKill.attached ? ", some follow objects - not tested" : "", mKill.checking, mKill.tick, mKill.objIndex, mKill.count);
+					if (mKill.inside.empty()) ImGui::TextDisabled("    you are not inside an enabled kill volume");
+					for (int k : mKill.insideDisabled) ImGui::TextDisabled("    inside kill volume #%d - disabled by the level script (never checked)", k);
+					if (mKill.gameTestFailed) ImGui::TextColored(ImVec4(1, 0.5f, 0.2f, 1), "    the game's trigger volume test faulted - using HCM's own box test");
+					else if (mKill.boxDisagree) ImGui::TextDisabled("    (HCM's box math disagrees with the game's test on %d volume(s) - the game's answer is used)", mKill.boxDisagree);
+					for (const auto& in : mKill.inside)
+						ImGui::TextColored(ImVec4(1.f, 0.9f, 0.f, 1.f), "    INSIDE kill volume #%d - checked in %d ticks (%.2f s); then every %d ticks (%.2f s)",
+							in.first, in.second, in.second / 30.f, mKill.count, mKill.count / 30.f);
+				}
+			}
+			if (settings.infoWeld && (settings.weldZonesNear || settings.weldZonesWelded))
 			{
 				ImGui::Separator();
 				if (!mWeld.valid) ImGui::TextDisabled("WELD ZONES: %s", mWeld.note.empty() ? "no biped on foot" : mWeld.note.c_str());
@@ -1961,6 +2105,7 @@ namespace h2cv
 			if (settings.ghost) drawGhost();
 			else if (mOffsetReq.exchange(0) && message) message("Offset save / load needs Ghost debug on (Halo 2).");
 			if (settings.weldZonesNear || settings.weldZonesWelded) drawWeldZones();
+			if (settings.killVolumes) drawKillVolumes();
 		}
 		mR.end();
 		return true;
@@ -2114,6 +2259,7 @@ namespace h2cv
 					if (settings.ghost) drawGhost();
 					else if (mOffsetReq.exchange(0) && message) message("Offset save / load needs Ghost debug on (Halo 2).");
 					if (settings.weldZonesNear || settings.weldZonesWelded) drawWeldZones();
+					if (settings.killVolumes) drawKillVolumes();
 				}
 				mR.end();
 			}
@@ -2129,6 +2275,26 @@ namespace h2cv
 				dl->AddText(p, L.col | 0xFF000000u, L.text);
 			}
 			gLabels.clear();
+			// out-of-bounds kill bar (Kill volumes / out-of-bounds timer): big and colour-coded for peripheral vision
+			if (settings.killVolumes && mOobBar >= 0.f)
+			{
+				const ImGuiIO& io = ImGui::GetIO();
+				const float w = std::max(220.f, io.DisplaySize.x * 0.28f), h = std::max(14.f, io.DisplaySize.y * 0.018f);
+				const ImVec2 a(io.DisplaySize.x * 0.5f - w * 0.5f, io.DisplaySize.y * 0.30f), b(a.x + w, a.y + h);
+				const float f = mOobBar;
+				const ImU32 fill = IM_COL32((int)(255.f * (1.f - f)), (int)(220.f * f + 35.f * (1.f - f)), 40, 235);
+				dl->AddRectFilled(ImVec2(a.x - 3, a.y - 3), ImVec2(b.x + 3, b.y + 3), IM_COL32(0, 0, 0, 170), 4.f);
+				dl->AddRectFilled(a, ImVec2(a.x + w * f, b.y), fill, 3.f);
+				dl->AddRect(a, b, IM_COL32(255, 255, 255, 120), 3.f, 0, 1.5f);
+				if (mOobBarText[0])
+				{
+					// what will kill you first: out of bounds or a kill volume (and the ticks left), centred above the bar
+					const ImVec2 ts = ImGui::CalcTextSize(mOobBarText);
+					const ImVec2 tp(io.DisplaySize.x * 0.5f - ts.x * 0.5f, a.y - ts.y - 6.f);
+					dl->AddRectFilled(ImVec2(tp.x - 4, tp.y - 2), ImVec2(tp.x + ts.x + 4, tp.y + ts.y + 2), IM_COL32(0, 0, 0, 170), 3.f);
+					dl->AddText(tp, fill | 0xFF000000u, mOobBarText);
+				}
+			}
 			if (settings.hud)
 			{
 				if (!eng::base()) { dl->AddText(ImVec2(12, 12), IM_COL32(255, 200, 0, 255), "Collision Viewer: game module not loaded"); }

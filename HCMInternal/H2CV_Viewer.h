@@ -57,7 +57,11 @@ namespace h2cv
 		std::atomic_bool ghostBelievedObjects{ true };
 		std::atomic_bool ghostLinkLabels{ false };       // label each believed-pose link line with its length (= the over-credit, wu)
 		std::atomic_bool ghostPass{ true };
-		std::atomic_bool offsetNaturalReverts{ false };  // offset save state: natural reverts to that checkpoint restore the offsets too              // flash (green) welded polygons / object pieces the current offset passes through
+		std::atomic_bool offsetNaturalReverts{ false };
+		std::atomic_bool killVolumes{ false };
+		// info panel sections
+		std::atomic_bool infoGeneral{ true }, infoTim{ true }, infoGhost{ true }, infoGhostObjects{ true }, infoGhostDetails{ true },
+			infoPass{ true }, infoTravel{ true }, infoLegend{ true }, infoGrids{ true }, infoKill{ true }, infoWeld{ true };           // kill volumes (out of bounds): boxes + "checked in N ticks" countdown  // offset save state: natural reverts to that checkpoint restore the offsets too              // flash (green) welded polygons / object pieces the current offset passes through
 		// weld zones (Halo 2, biped): for each polygon / object, the box the player's welder query-box CENTRE has to enter
 		// for that polygon to get a welder child (= its bounds grown by the half-extents of the welder's stored query box).
 		// Near = every level polygon / rigid body whose zone is within weldZoneRange of that centre; Welded = only the
@@ -134,6 +138,12 @@ namespace h2cv
 		void drawPills();
 		void drawGhost();
 		void drawWeldZones();
+		void drawKillVolumes();
+		struct KillStats { bool valid = false; int count = 0, enabled = 0, attached = 0; uint32_t tick = 0, objIndex = 0; int checking = -1;
+			std::vector<std::pair<int, int>> inside; std::string note; h2::OobTimer oob; int boxDisagree = 0; bool gameTestFailed = false; std::vector<int> insideDisabled; };   // inside: (kill volume, ticks until it is checked)
+		KillStats mKill;
+		float mOobBar = -1.f;   // death bar: remaining fraction of the nearest kill (1 = full, 0 = this tick), < 0 = hidden
+		char mOobBarText[64] = {};   // what that kill is: "OUT OF BOUNDS" / "KILL VOLUME #k", with the ticks left
 		void drawHud(const h2::Camera& cam);
 
 		// ---- Halo 3 / ODST (Viewer3.cpp) ----

@@ -1107,6 +1107,82 @@ public:
 			nameof(collisionViewerGhostLinkLabels)
 		);
 
+	// Halo 2: which sections the Collision Viewer info panel shows
+	std::shared_ptr<BinarySetting<bool>> collisionViewerInfoGeneral = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerInfoGeneral)
+		);
+	std::shared_ptr<BinarySetting<bool>> collisionViewerInfoTim = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerInfoTim)
+		);
+	std::shared_ptr<BinarySetting<bool>> collisionViewerInfoGhost = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerInfoGhost)
+		);
+	std::shared_ptr<BinarySetting<bool>> collisionViewerInfoGhostObjects = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerInfoGhostObjects)
+		);
+	std::shared_ptr<BinarySetting<bool>> collisionViewerInfoGhostDetails = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerInfoGhostDetails)
+		);
+	std::shared_ptr<BinarySetting<bool>> collisionViewerInfoPass = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerInfoPass)
+		);
+	std::shared_ptr<BinarySetting<bool>> collisionViewerInfoTravel = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerInfoTravel)
+		);
+	std::shared_ptr<BinarySetting<bool>> collisionViewerInfoLegend = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerInfoLegend)
+		);
+	std::shared_ptr<BinarySetting<bool>> collisionViewerInfoGrids = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerInfoGrids)
+		);
+	std::shared_ptr<BinarySetting<bool>> collisionViewerInfoKill = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerInfoKill)
+		);
+	std::shared_ptr<BinarySetting<bool>> collisionViewerInfoWeld = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerInfoWeld)
+		);
+
+	// Halo 2: kill volumes (out-of-bounds deaths) with a per-volume "checked in N ticks" countdown
+	std::shared_ptr<BinarySetting<bool>> collisionViewerKillVolumes = std::make_shared<BinarySetting<bool>>
+		(
+			false,
+			[](bool in) { return true; },
+			nameof(collisionViewerKillVolumes)
+		);
+
 	// Halo 2: offset save state - also restore the saved offsets after natural reverts to that checkpoint
 	std::shared_ptr<BinarySetting<bool>> collisionViewerOffsetNaturalReverts = std::make_shared<BinarySetting<bool>>
 		(

@@ -1116,6 +1116,7 @@ private:
 							createNestedElement(GUIElementEnum::collisionViewerGhostJumpGUI),
 							createNestedElement(GUIElementEnum::collisionViewerGhostVehiclesGUI),
 							createNestedElement(GUIElementEnum::collisionViewerGhostHaloGUI),
+							createNestedElement(GUIElementEnum::collisionViewerKillVolumesGUI),
 							createNestedElement(GUIElementEnum::collisionViewerCreasesGUI),
 							createNestedElement(GUIElementEnum::collisionViewerCreaseFacesGUI),
 							createNestedElement(GUIElementEnum::collisionViewerLineWidthGUI),
@@ -1177,8 +1178,65 @@ private:
 						(game, ToolTipCollection("The capsule Havok actually collides with, for every biped (yours yellow), drawn through walls."), std::nullopt, "Havok capsules", settings->collisionViewerPills));
 
 				case GUIElementEnum::collisionViewerInfoPanelGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUIToggleWithChildren<GUIToggleWithChildrenParameters::ShowWhenTrue, false>>
+						(game, ToolTipCollection("Small panel: mode, pair state S, the TIM table, ghost rows, kill volumes, weld zones. Tick it to choose which sections it shows (Halo 2)."), std::nullopt, "Info panel", settings->collisionViewerInfoPanel, headerChildElements
+							{
+							createNestedElement(GUIElementEnum::collisionViewerInfoGeneralGUI),
+							createNestedElement(GUIElementEnum::collisionViewerInfoTimGUI),
+							createNestedElement(GUIElementEnum::collisionViewerInfoGhostGUI),
+							createNestedElement(GUIElementEnum::collisionViewerInfoGhostObjectsGUI),
+							createNestedElement(GUIElementEnum::collisionViewerInfoGhostDetailsGUI),
+							createNestedElement(GUIElementEnum::collisionViewerInfoPassGUI),
+							createNestedElement(GUIElementEnum::collisionViewerInfoTravelGUI),
+							createNestedElement(GUIElementEnum::collisionViewerInfoLegendGUI),
+							createNestedElement(GUIElementEnum::collisionViewerInfoGridsGUI),
+							createNestedElement(GUIElementEnum::collisionViewerInfoKillGUI),
+							createNestedElement(GUIElementEnum::collisionViewerInfoWeldGUI),
+							}));
+
+				case GUIElementEnum::collisionViewerInfoGeneralGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("Small panel: mode, pair state S, the TIM table (key, polygon, TIM, contact points, true distance, over-credit)."), std::nullopt, "Info panel", settings->collisionViewerInfoPanel));
+						(game, ToolTipCollection("Occlusion mode, line settings and the per-category line counts at the top."), std::nullopt, "General (occlusion, widths, category counts)", settings->collisionViewerInfoGeneral));
+
+				case GUIElementEnum::collisionViewerInfoTimGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("The TIM overlay line and the per-polygon TIM table."), std::nullopt, "TIM table", settings->collisionViewerInfoTim));
+
+				case GUIElementEnum::collisionViewerInfoGhostGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("The GHOST debug line and one line per player (S, skipped, suspect, max over-credit, believed poses)."), std::nullopt, "Ghost summary", settings->collisionViewerInfoGhost));
+
+				case GUIElementEnum::collisionViewerInfoGhostObjectsGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("Object pair counts, pair rows and nearby machines under each player."), std::nullopt, "Ghost objects", settings->collisionViewerInfoGhostObjects));
+
+				case GUIElementEnum::collisionViewerInfoGhostDetailsGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("Havok-Halo offsets, last rewind, and diagnostic notes under each player."), std::nullopt, "Ghost details", settings->collisionViewerInfoGhostDetails));
+
+				case GUIElementEnum::collisionViewerInfoPassGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("The PASS-THROUGH line and the per-polygon pass test rows."), std::nullopt, "Pass-through rows", settings->collisionViewerInfoPass));
+
+				case GUIElementEnum::collisionViewerInfoTravelGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("The travel region rows (level and objects)."), std::nullopt, "Travel region rows", settings->collisionViewerInfoTravel));
+
+				case GUIElementEnum::collisionViewerInfoLegendGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("The two grey legend lines under the ghost section."), std::nullopt, "Color legend", settings->collisionViewerInfoLegend));
+
+				case GUIElementEnum::collisionViewerInfoGridsGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("Tolerance, broadphase / MOPP grids and backstep parameters."), std::nullopt, "Level grids", settings->collisionViewerInfoGrids));
+
+				case GUIElementEnum::collisionViewerInfoKillGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("The out-of-bounds timer and the kill volume rows (needs Kill volumes on)."), std::nullopt, "Out-of-bounds timer + kill volume rows", settings->collisionViewerInfoKill));
+
+				case GUIElementEnum::collisionViewerInfoWeldGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("The weld zone summary (needs a weld zone mode on)."), std::nullopt, "Weld zones", settings->collisionViewerInfoWeld));
 
 				case GUIElementEnum::collisionViewerGhostGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUIToggleWithChildren<GUIToggleWithChildrenParameters::ShowWhenTrue, false>>
@@ -1249,6 +1307,10 @@ private:
 							createNestedElement(GUIElementEnum::collisionViewerGhostColDesyncGUI),
 							createNestedElement(GUIElementEnum::collisionViewerGhostColBelievedGUI),
 							}));
+
+				case GUIElementEnum::collisionViewerKillVolumesGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("Halo 2: an on-screen bar for the out-of-bounds kill - it appears full / green the moment the game starts counting (your body is inside solid / outside the level) and drains to red over the 16 ticks to the kill; it vanishes when the count resets. The info panel adds the exact numbers and the kill volume rotation: which volume is checked this tick and, for any volume you are inside, how many ticks until its turn. (Kill volume boxes themselves are not drawn here.)"), std::nullopt, "Out-of-bounds timer bar", settings->collisionViewerKillVolumes));
 
 				case GUIElementEnum::collisionViewerOffsetNaturalRevertsGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>

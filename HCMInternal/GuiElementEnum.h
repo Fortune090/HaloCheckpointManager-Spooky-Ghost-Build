@@ -836,7 +836,19 @@
 			((collisionViewerGhostObjectsHeadingGUI, (Halo2)))\
 			((collisionViewerGhostOffsetsHeadingGUI, (Halo2)))\
 			((collisionViewerGhostLoggingHeadingGUI, (Halo2, Halo3, Halo3ODST)))\
-			((collisionViewerGhostColorsHeadingGUI, (Halo2, Halo3, Halo3ODST)))
+			((collisionViewerGhostColorsHeadingGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerKillVolumesGUI, (Halo2)))\
+			((collisionViewerInfoGeneralGUI, (Halo2)))\
+			((collisionViewerInfoTimGUI, (Halo2)))\
+			((collisionViewerInfoGhostGUI, (Halo2)))\
+			((collisionViewerInfoGhostObjectsGUI, (Halo2)))\
+			((collisionViewerInfoGhostDetailsGUI, (Halo2)))\
+			((collisionViewerInfoPassGUI, (Halo2)))\
+			((collisionViewerInfoTravelGUI, (Halo2)))\
+			((collisionViewerInfoLegendGUI, (Halo2)))\
+			((collisionViewerInfoGridsGUI, (Halo2)))\
+			((collisionViewerInfoKillGUI, (Halo2)))\
+			((collisionViewerInfoWeldGUI, (Halo2)))
 
 
 

@@ -727,6 +727,54 @@ const std::map <GUIElementEnum, std::vector<OptionalCheatEnum>> GUIRequiredServi
 		{OptionalCheatEnum::CollisionViewer}
 	},
 
+	{ GUIElementEnum::collisionViewerKillVolumesGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerInfoGeneralGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerInfoTimGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerInfoGhostGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerInfoGhostObjectsGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerInfoGhostDetailsGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerInfoPassGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerInfoTravelGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerInfoLegendGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerInfoGridsGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerInfoKillGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
+	{ GUIElementEnum::collisionViewerInfoWeldGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
+
 	{ GUIElementEnum::collisionViewerGhostTravelGUI,
 		{OptionalCheatEnum::CollisionViewer}
 	},
