@@ -3,6 +3,7 @@
 #include <dxgi.h>
 #include <atomic>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <cstdint>
 #include <string>
@@ -50,6 +51,23 @@ namespace h2cv
 		std::atomic_bool ghostRewind{ true };           // (e/g) backstep rewind target + pre-rewind pose
 		std::atomic_bool ghostJump{ true };             // Halo 3 / ODST: last jump (com0 != previous com1) markers
 		std::atomic_bool ghostBelieved{ true };         // (f) poses the over-credited TIMs believe     [Shift+Home]
+		// (f2) the same for OBJECTS: baked scenery children of the level welder (key categories 3 / 4) and the subject's pairs
+		// against other rigid bodies (crates, machines, vehicles, dynamic scenery, other bipeds; biped subject only).
+		// Also feeds the lime state, the desync edges and the logger while on.
+		std::atomic_bool ghostBelievedObjects{ true };
+		std::atomic_bool ghostLinkLabels{ false };       // label each believed-pose link line with its length (= the over-credit, wu)
+		std::atomic_bool ghostPass{ true };
+		std::atomic_bool offsetNaturalReverts{ false };  // offset save state: natural reverts to that checkpoint restore the offsets too              // flash (green) welded polygons / object pieces the current offset passes through
+		// weld zones (Halo 2, biped): for each polygon / object, the box the player's welder query-box CENTRE has to enter
+		// for that polygon to get a welder child (= its bounds grown by the half-extents of the welder's stored query box).
+		// Near = every level polygon / rigid body whose zone is within weldZoneRange of that centre; Welded = only the
+		// ones that currently have a child (polygons, baked scenery) or a pair (rigid bodies).
+		// ghost travel region: for each over-credited level polygon, where the body can go without ending the over-credit
+		std::atomic_bool ghostTravel{ false };          // level polygons
+		std::atomic_bool ghostTravelObjects{ false };   // objects: rigid-body pairs and baked scenery
+		std::atomic_bool weldZonesNear{ false };
+		std::atomic_bool weldZonesWelded{ false };
+		std::atomic<float> weldZoneRange{ 1.0f };
 		std::atomic_bool ghostEdges{ true };            // lime/red edges of skipped / over-credited polygons [Shift+End]
 		std::atomic_bool ghostEdgesSuspectOnly{ false };// false = every skipped child (TIM>0), true = only stale / over-credited ones
 		std::atomic_bool ghostStrictSkip{ false };      // true = ANY skipped child turns the capsule lime (very common on floors)
@@ -71,6 +89,17 @@ namespace h2cv
 	{
 	public:
 		Settings settings;
+
+		// ---- OFFSET SAVE STATE (Halo 2, biped) ----
+		// Save: snapshot every skipped TIM the player holds (level polygons by key, object pieces by their stable id), fire
+		// HCM's force checkpoint, and once the checkpoint has rebuilt the pairs write the snapshot back - so you keep
+		// playing with your offsets. Load: fire HCM's force revert, wait for the pairs to come back, verify you are where
+		// the snapshot was taken, and write the TIMs back into the matching new agents. HCM's checkpoint / revert features
+		// are only triggered, never changed.
+		void requestOffsetSave() { mOffsetReq.store(1); }
+		void requestOffsetLoad() { mOffsetReq.store(2); }
+		std::function<void()> fireCheckpoint, fireRevert;
+		std::function<void(std::string)> message;
 
 		// ---- ghost desync LOGGER (render thread only; JSON lines next to the module, see logEvent) ----
 		struct LogKey { uint64_t k; bool operator==(const LogKey& o) const { return k == o.k; } };
@@ -104,6 +133,7 @@ namespace h2cv
 		void drawTim();
 		void drawPills();
 		void drawGhost();
+		void drawWeldZones();
 		void drawHud(const h2::Camera& cam);
 
 		// ---- Halo 3 / ODST (Viewer3.cpp) ----
@@ -183,9 +213,61 @@ namespace h2cv
 			float dOrigin = 0, dCom = 0, comOff = 0; bool haloRefCom = false; float prevDelta = 0;
 			float rewindDist = 0, tStar = 0; int rewindAge = -1;
 			bool lime = false, hold = false; int nBelieved = 0;
+			std::vector<std::string> travel;   // ghost travel region rows for the info panel (level polygons)
+			std::vector<std::string> travelObj; // ... objects
+			std::vector<std::string> objPairRows, machineRows;   // object pair / nearby machine diagnostics
+			float tolerance = 0;
+			// objects (ghostBelievedObjects)
+			bool objScanned = false;
+			int nObjPairs = 0, nObjBaked = 0, nObjBakedFail = 0, nObjLeaves = 0, nObjTims = 0, nObjSkipped = 0, nObjSuspect = 0, nObjUnsupported = 0, nObjBelieved = 0;
+			float maxObjOver = 0;
+			std::string objNote;
+			// pass-through prediction (ghostPass)
+			int nPassLevel = 0, nPassObj = 0; float passBest = 0;
+			std::vector<std::string> passRows;
 		};
 		GhostPlayer mGP[4];
+		std::atomic_int mOffsetReq{ 0 };   // 1 save, 2 load (set by the GUI / hotkey thread, taken by drawGhost)
+		struct OffsetEntry { bool obj = false; uint64_t id = 0; h2::Child state; };
+		struct OffsetSlot { bool valid = false; h2::Vec3 pos{}; std::vector<OffsetEntry> e; };
+		OffsetSlot mOffsetSlot[4];
+		enum class OffsetPhase : uint8_t { Idle, WaitRebuild, Apply };
+		struct OffsetRun { OffsetPhase phase = OffsetPhase::Idle; bool isLoad = false; uintptr_t oldAgent = 0; int frames = 0, restored = 0; std::vector<bool> done; uint32_t reqTick = 0; };
+		uint32_t mOffsetLastTick[4]{};     // game tick seen last frame (a revert makes it go backwards)
+		OffsetRun mOffsetRun[4];
+		std::string mOffsetStatus;         // shown in the info panel
 		GhostInfo mGI[4];
+		// pass-through prediction: the side each TIM was first seen from (kept while it lives, so the normals do not flip
+		// while the player passes through); key = (user << 40) | (object << 39) | key/id, value = (side, last frame seen)
+		std::vector<std::pair<uint64_t, std::pair<int, uint32_t>>> mPassSide;
+		int passSide(uint64_t key, bool frontNow)
+		{
+			for (auto& e : mPassSide) if (e.first == key) { e.second.second = mLogFrame; return e.second.first; }
+			mPassSide.push_back({ key, { frontNow ? 1 : -1, mLogFrame } });
+			return frontNow ? 1 : -1;
+		}
+		// parsed collision_bsps reached through object welders (Believed poses - objects), by collision_bsp address;
+		// dropped whenever the structure bsp changes (tag data moves on a map / bsp load)
+		std::unordered_map<uintptr_t, CollBsp> mObjBsp;
+		uintptr_t mObjBspSbsp = 0;
+		// weld zones: AABB of every level collision polygon (world + instanced), keyed like the welder's child keys,
+		// built once per structure bsp load
+		struct WeldPoly { h2::Vec3 mn, mx; uint32_t key; };
+		std::vector<WeldPoly> mWeldPolys;
+		uintptr_t mWeldPolysSbsp = 0;
+		struct WeldStats
+		{
+			bool valid = false; int user = -1;
+			int welded = 0, weldedObjects = 0, nearPolys = 0, nearObjects = 0, drawn = 0; bool capped = false;
+			h2::Vec3 boxSize{}; std::string note;
+		};
+		WeldStats mWeld;
+		// per local user: your broadphase margin around the capsule, measured only while you stand still (moving stretches
+		// the broadphase box by your motion) and kept for the rest of the bsp; 0.5 x tolerance until the first sample
+		float mBpMargin[4][3] = {};
+		bool mBpMarginOk[4] = {};
+		uintptr_t mBpMarginSbsp = 0;
+		h2::Vec3 bpRestMargin(int user, uintptr_t ent, const h2::Vec3& capMn, const h2::Vec3& capMx);
 
 		// HUD stats
 		struct TimRow { uint32_t key; int cat; uint32_t inst, surf; float tim; int manifold; uint8_t kind; float trueDist; };

@@ -99,6 +99,20 @@ private:
 		mSettings->shieldInputPrinterHotkeyEvent,
 		vsk{}),
 
+		// Chase Camera toggle (Camera tab). Unbound by default.
+		initEventOnPressHotkey(chaseCamera,
+		mSettings->chaseCameraHotkeyEvent,
+		vsk{}),
+
+		// Halo 2 offset save state (Collision Viewer). Unbound by default.
+		initEventOnPressHotkey(offsetSave,
+		mSettings->offsetSaveEvent,
+		vsk{}),
+
+		initEventOnPressHotkey(offsetLoad,
+		mSettings->offsetLoadEvent,
+		vsk{}),
+
 		initEventOnPressHotkey(toggleGUI,
 		mSettings->toggleGUIHotkeyEvent,
 		vsk{{ ImGuiKey_GraveAccent }}),

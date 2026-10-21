@@ -800,6 +800,16 @@
 			((collisionViewerInfoPanelGUI, (Halo2, Halo3, Halo3ODST)))\
 			((collisionViewerGhostGUI, (Halo2, Halo3, Halo3ODST)))\
 			((collisionViewerGhostBelievedGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerGhostBelievedObjectsGUI, (Halo2)))\
+			((collisionViewerGhostLinkLabelsGUI, (Halo2)))\
+			((collisionViewerGhostPassGUI, (Halo2)))\
+			((collisionViewerOffsetSaveGUI, (Halo2)))\
+			((collisionViewerOffsetLoadGUI, (Halo2)))\
+			((collisionViewerGhostTravelGUI, (Halo2)))\
+			((collisionViewerGhostTravelObjectsGUI, (Halo2)))\
+			((collisionViewerWeldZonesNearGUI, (Halo2)))\
+			((collisionViewerWeldZonesWeldedGUI, (Halo2)))\
+			((collisionViewerWeldZoneRangeGUI, (Halo2)))\
 			((collisionViewerGhostTrailGUI, (Halo2, Halo3, Halo3ODST)))\
 			((collisionViewerGhostRewindGUI, (Halo2)))\
 			((collisionViewerGhostJumpGUI, (Halo3, Halo3ODST)))\
@@ -819,7 +829,14 @@
 			((collisionViewerDepthPullGUI, (Halo2, Halo3, Halo3ODST)))\
 			((collisionViewerRadiusGUI, (Halo2, Halo3, Halo3ODST)))\
 			((collisionViewerHiddenAlphaGUI, (Halo2, Halo3, Halo3ODST)))\
-			((collisionViewerReversedZGUI, (Halo2)))
+			((collisionViewerReversedZGUI, (Halo2)))\
+			((collisionViewerOffsetNaturalRevertsGUI, (Halo2)))\
+			((collisionViewerGhostPlayerHeadingGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerGhostLevelHeadingGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerGhostObjectsHeadingGUI, (Halo2)))\
+			((collisionViewerGhostOffsetsHeadingGUI, (Halo2)))\
+			((collisionViewerGhostLoggingHeadingGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerGhostColorsHeadingGUI, (Halo2, Halo3, Halo3ODST)))
 
 
 

@@ -1113,20 +1113,9 @@ private:
 							createNestedElement(GUIElementEnum::collisionViewerPillsGUI),
 							createNestedElement(GUIElementEnum::collisionViewerInfoPanelGUI),
 							createNestedElement(GUIElementEnum::collisionViewerGhostGUI),
-							createNestedElement(GUIElementEnum::collisionViewerGhostBelievedGUI),
-							createNestedElement(GUIElementEnum::collisionViewerGhostTrailGUI),
-							createNestedElement(GUIElementEnum::collisionViewerGhostRewindGUI),
 							createNestedElement(GUIElementEnum::collisionViewerGhostJumpGUI),
-							createNestedElement(GUIElementEnum::collisionViewerGhostPrevGUI),
-							createNestedElement(GUIElementEnum::collisionViewerGhostHaloGUI),
-							createNestedElement(GUIElementEnum::collisionViewerGhostEdgesGUI),
-							createNestedElement(GUIElementEnum::collisionViewerGhostEdgesSuspectGUI),
-							createNestedElement(GUIElementEnum::collisionViewerGhostShowRealGUI),
-							createNestedElement(GUIElementEnum::collisionViewerGhostColNormalGUI),
-							createNestedElement(GUIElementEnum::collisionViewerGhostColDesyncGUI),
-							createNestedElement(GUIElementEnum::collisionViewerGhostColBelievedGUI),
 							createNestedElement(GUIElementEnum::collisionViewerGhostVehiclesGUI),
-							createNestedElement(GUIElementEnum::collisionViewerGhostLogGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostHaloGUI),
 							createNestedElement(GUIElementEnum::collisionViewerCreasesGUI),
 							createNestedElement(GUIElementEnum::collisionViewerCreaseFacesGUI),
 							createNestedElement(GUIElementEnum::collisionViewerLineWidthGUI),
@@ -1192,16 +1181,126 @@ private:
 						(game, ToolTipCollection("Small panel: mode, pair state S, the TIM table (key, polygon, TIM, contact points, true distance, over-credit)."), std::nullopt, "Info panel", settings->collisionViewerInfoPanel));
 
 				case GUIElementEnum::collisionViewerGhostGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUIToggleWithChildren<GUIToggleWithChildrenParameters::ShowWhenTrue, false>>
+						(game, ToolTipCollection("Halo 2 ghosting: your Havok capsule turns lime while a backstep rewind is active (S > 0) or a nearby polygon is stale/over-credited, red at S = -3 (bisection failed). The options below appear when this is ticked."), std::nullopt, "Ghost debug (desync view)", settings->collisionViewerGhost, headerChildElements
+							{
+							createNestedElement(GUIElementEnum::collisionViewerGhostPlayerHeadingGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostLevelHeadingGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostObjectsHeadingGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostOffsetsHeadingGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostLoggingHeadingGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostColorsHeadingGUI),
+							}));
+
+				case GUIElementEnum::collisionViewerGhostPlayerHeadingGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISubHeading<true>>
+						(game, ToolTipCollection("Your own capsule: rewinds, poses, trail, pass-through prediction."), "Player", headerChildElements
+							{
+							createNestedElement(GUIElementEnum::collisionViewerGhostShowRealGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostRewindGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostPrevGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostTrailGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostPassGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostLinkLabelsGUI),
+							}));
+
+				case GUIElementEnum::collisionViewerGhostLevelHeadingGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISubHeading<true>>
+						(game, ToolTipCollection("Level polygons: believed poses, travel regions, weld zones, desync edges."), "Level", headerChildElements
+							{
+							createNestedElement(GUIElementEnum::collisionViewerGhostBelievedGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostTravelGUI),
+							createNestedElement(GUIElementEnum::collisionViewerWeldZonesNearGUI),
+							createNestedElement(GUIElementEnum::collisionViewerWeldZonesWeldedGUI),
+							createNestedElement(GUIElementEnum::collisionViewerWeldZoneRangeGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostEdgesGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostEdgesSuspectGUI),
+							}));
+
+				case GUIElementEnum::collisionViewerGhostObjectsHeadingGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISubHeading<true>>
+						(game, ToolTipCollection("Objects paired with you: crates, doors, machines, vehicles, other bipeds, baked scenery."), "Objects", headerChildElements
+							{
+							createNestedElement(GUIElementEnum::collisionViewerGhostBelievedObjectsGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostTravelObjectsGUI),
+							}));
+
+				case GUIElementEnum::collisionViewerGhostOffsetsHeadingGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISubHeading<true>>
+						(game, ToolTipCollection("Save your offsets together with a checkpoint and bring them back after reverting."), "Offset save state", headerChildElements
+							{
+							createNestedElement(GUIElementEnum::collisionViewerOffsetSaveGUI),
+							createNestedElement(GUIElementEnum::collisionViewerOffsetLoadGUI),
+							createNestedElement(GUIElementEnum::collisionViewerOffsetNaturalRevertsGUI),
+							}));
+
+				case GUIElementEnum::collisionViewerGhostLoggingHeadingGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISubHeading<true>>
+						(game, ToolTipCollection("Desync logger."), "Logging", headerChildElements
+							{
+							createNestedElement(GUIElementEnum::collisionViewerGhostLogGUI),
+							}));
+
+				case GUIElementEnum::collisionViewerGhostColorsHeadingGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISubHeading<false>>
+						(game, ToolTipCollection("Ghost capsule colors."), "Colors", headerChildElements
+							{
+							createNestedElement(GUIElementEnum::collisionViewerGhostColNormalGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostColDesyncGUI),
+							createNestedElement(GUIElementEnum::collisionViewerGhostColBelievedGUI),
+							}));
+
+				case GUIElementEnum::collisionViewerOffsetNaturalRevertsGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("Halo 2 ghosting: your Havok capsule turns lime while a backstep rewind is active (S > 0) or a nearby polygon is stale/over-credited, red at S = -3 (bisection failed). Draws the extra capsules and desync edges selected below."), std::nullopt, "Ghost debug (desync view)", settings->collisionViewerGhost));
+						(game, ToolTipCollection("Off: only Load Offsets restores them; dying or reverting from the pause menu resets them like normal. On: any revert that puts you back where the offsets were saved restores them too."), std::nullopt, "Restore offsets after natural reverts too", settings->collisionViewerOffsetNaturalReverts));
 
 				case GUIElementEnum::collisionViewerGhostBelievedGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("Where each over-credited polygon's cached TIM believes you are: your capsule pushed away from that polygon by the over-credit, with a line back to the real capsule (up to 6). Ceiling/floor polygons put these above/below you."), std::nullopt, "  Believed poses (TIM)", settings->collisionViewerGhostBelieved));
+						(game, ToolTipCollection("Where each over-credited polygon's cached TIM believes you are: your capsule pushed away from that polygon by the over-credit, with a line back to the real capsule (up to 6). Ceiling/floor polygons put these above/below you."), std::nullopt, "Level believed poses", settings->collisionViewerGhostBelieved));
+
+				case GUIElementEnum::collisionViewerGhostLinkLabelsGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("Halo 2: labels each line between your capsule and a believed pose (level and object) with its length in world units. That length is the over-credit: how much farther away the cached TIM believes the surface is than it really is."), std::nullopt, "Believed pose distances", settings->collisionViewerGhostLinkLabels));
+
+				case GUIElementEnum::collisionViewerOffsetSaveGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleButton<true>>
+						(game, ToolTipCollection("Halo 2 (Ghost debug on): snapshots every TIM you are holding - level polygons and object pieces, offsets included - then forces a checkpoint. The checkpoint stores the objects as usual; once it has rebuilt your physics pairs, the snapshot is written back so you keep your offsets. Uses HCM's own Force Checkpoint, unchanged."), RebindableHotkeyEnum::offsetSave, "Save Offsets (+ checkpoint)", settings->offsetSaveEvent));
+
+				case GUIElementEnum::collisionViewerOffsetLoadGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleButton<true>>
+						(game, ToolTipCollection("Halo 2 (Ghost debug on): forces a revert to the checkpoint made by Save Offsets, waits for your physics pairs to come back, checks you are where the offsets were saved, and writes the saved TIMs back into the matching pairs. If a newer checkpoint has replaced it (you are somewhere else after the revert), nothing is written. Uses HCM's own Force Revert, unchanged."), RebindableHotkeyEnum::offsetLoad, "Load Offsets (revert)", settings->offsetLoadEvent));
+
+				case GUIElementEnum::collisionViewerGhostPassGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("Halo 2: flashes (green) every welded polygon / object piece your current offset lets you pass through. The TIM is spent linearly (n . dp per move, whatever the path); you pass when it still has some left once your capsule is fully over the surface and fully past its plane (object pieces: your centre past the piece's middle along the TIM normal). The info panel lists the numbers per offset polygon."), std::nullopt, "Pass-through prediction", settings->collisionViewerGhostPass));
+
+				case GUIElementEnum::collisionViewerGhostTravelGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("Halo 2, needs Ghost debug: for each over-credited level polygon (up to 6), what keeps the over-credit alive. Coloured box = the polygon's weld zone, fixed to it: the white cross (your capsule centre) must stay inside, or the welder drops that polygon's child and its TIM with it. Red sheet = the polygon pushed to the depth where your body centre makes the TIM reach 0 (then the exact test runs and the over-credit is gone); the TIM only drains when you move toward the polygon along its normal, so the sheet stays fixed to the wall. The info panel lists each one's remaining toward-polygon budget and box overlap."), std::nullopt, "Level travel regions", settings->collisionViewerGhostTravel));
+
+				case GUIElementEnum::collisionViewerGhostTravelObjectsGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("Halo 2, needs Ghost debug: the travel region for over-credited OBJECT TIMs (up to 6), drawn and listed separately from the level ones because they live differently. Red sheet = the same TIM reset plane (for a moving object it moves too: its motion drains the TIM as well). Box = where the white cross (your capsule centre) must stay, fixed to the object: baked scenery = the level welder's zone around the object; crate / machine / vehicle / other biped = the broadphase zone (its real broadphase box grown by your capsule plus your broadphase margin) - leave it and the whole pair is destroyed and EVERY TIM against that object resets at once. Collision-model pieces also have their own welder zone (thin, oriented with the object). Runs the object scan even with 'Believed poses - objects' off."), std::nullopt, "Object travel regions", settings->collisionViewerGhostTravelObjects));
+
+				case GUIElementEnum::collisionViewerWeldZonesNearGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("Halo 2 (on foot): weld zones of every level polygon and rigid body near you, fixed to the geometry: a polygon / object has a welder child (a TIM) while the white cross (your capsule centre) is inside its zone. A zone is its box grown by your capsule's half-size plus the engine's margin (level welder: 1.5x the collision tolerance; rigid bodies: your broadphase margin). Moving adds a little extra reach in your direction of travel. Lime = welded polygon, orange = welded object, cyan = near polygon, pale orange = near body. Only zones within 'Weld zone range' of the cross are drawn (up to 600, nearest first). Works without Ghost debug."), std::nullopt, "Weld zones (nearby)", settings->collisionViewerWeldZonesNear));
+
+				case GUIElementEnum::collisionViewerWeldZonesWeldedGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("Halo 2 (on foot): weld zones of ONLY the polygons and objects currently welded to you - every level polygon / baked scenery piece that has a welder child, and every rigid body with a broadphase pair against your biped. Cheaper than the nearby view; ignores the range."), std::nullopt, "Weld zones (welded only)", settings->collisionViewerWeldZonesWelded));
+
+				case GUIElementEnum::collisionViewerWeldZoneRangeGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUIFloat<SliderParam<float>(0.f, 20.f)>>
+						(game, ToolTipCollection("Weld zones (nearby): only zones within this distance of the white cross are drawn. 0 = only zones you are inside."), "Weld zone range (wu)", settings->collisionViewerWeldZoneRange));
+
+				case GUIElementEnum::collisionViewerGhostBelievedObjectsGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("Halo 2: believed poses for TIMs against OBJECTS, drawn in orange. Covers static scenery baked into the level (its physics or collision model, reached through the level welder) and, for a biped, every pair with another rigid body: crates, machines, vehicles, dynamic scenery, other bipeds. Each skipped child whose cached TIM over-credits the real gap to the object puts a copy of your capsule where that TIM believes you are. While on, object suspects also turn the capsule lime, show as desync edges, and go to the desync logger (source \"object\"). The info panel lists the object pairs and any leaf agents whose TIMs can't be read."), std::nullopt, "Object believed poses", settings->collisionViewerGhostBelievedObjects));
 
 				case GUIElementEnum::collisionViewerGhostTrailGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("Havok's pose on each of the last 8 game ticks, fading; lime on ticks where a backstep was active. Rewinds show up as kinks."), std::nullopt, "  Tick trail", settings->collisionViewerGhostTrail));
+						(game, ToolTipCollection("Havok's pose on each of the last 8 game ticks, fading; lime on ticks where a backstep was active. Rewinds show up as kinks."), std::nullopt, "Tick trail", settings->collisionViewerGhostTrail));
 
 				case GUIElementEnum::collisionViewerShowSoftCeilingsGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
@@ -1209,47 +1308,47 @@ private:
 
 				case GUIElementEnum::collisionViewerGhostJumpGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("Halo 3 / ODST: the last position JUMP. Halo 3's Havok integrates every step with centre-of-mass 0 := centre-of-mass 1 of the previous step, so a gap between them means the body was moved between two ticks by something other than the simulation - a raw position write (Force Teleport), or an engine path that skips the safe reposition. Yellow = where the next step started, red-orange = where the body was at the end of the previous step; the info panel says whether Halo's own object position moved with it."), std::nullopt, "  Jump markers (raw position writes)", settings->collisionViewerGhostJump));
+						(game, ToolTipCollection("Halo 3 / ODST: the last position JUMP. Halo 3's Havok integrates every step with centre-of-mass 0 := centre-of-mass 1 of the previous step, so a gap between them means the body was moved between two ticks by something other than the simulation - a raw position write (Force Teleport), or an engine path that skips the safe reposition. Yellow = where the next step started, red-orange = where the body was at the end of the previous step; the info panel says whether Halo's own object position moved with it."), std::nullopt, "Jump markers (raw position writes)", settings->collisionViewerGhostJump));
 
 				case GUIElementEnum::collisionViewerGhostRewindGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("The last backstep rewind: yellow = where the bisector rewound you to, red-orange = where you were before, with the rewind distance and t* in the info panel."), std::nullopt, "  Backstep rewind pose", settings->collisionViewerGhostRewind));
+						(game, ToolTipCollection("The last backstep rewind: yellow = where the bisector rewound you to, red-orange = where you were before, with the rewind distance and t* in the info panel."), std::nullopt, "Backstep rewind poses", settings->collisionViewerGhostRewind));
 
 				case GUIElementEnum::collisionViewerGhostPrevGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("Havok's pose at the start of the current physics step (motion PREV). Differs from the current pose by about one tick of movement while running."), std::nullopt, "  Step-start pose", settings->collisionViewerGhostPrev));
+						(game, ToolTipCollection("Havok's pose at the start of the current physics step (motion PREV). Differs from the current pose by about one tick of movement while running."), std::nullopt, "Step-start pose", settings->collisionViewerGhostPrev));
 
 				case GUIElementEnum::collisionViewerGhostHaloGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("Where Halo itself thinks the biped is (object position), white, when it differs from Havok's body."), std::nullopt, "  Halo object position", settings->collisionViewerGhostHalo));
+						(game, ToolTipCollection("Where Halo itself thinks the biped is (object position), white, when it differs from Havok's body."), std::nullopt, "Halo object position", settings->collisionViewerGhostHalo));
 
 				case GUIElementEnum::collisionViewerGhostEdgesGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("Thick lime edges on every polygon Havok is currently skipping for you (TIM > 0), thick red on stale/over-credited ones - the surfaces you are desyncing from."), std::nullopt, "  Desync edges", settings->collisionViewerGhostEdges));
+						(game, ToolTipCollection("Thick lime edges on every polygon Havok is currently skipping for you (TIM > 0), thick red on stale/over-credited ones - the surfaces you are desyncing from."), std::nullopt, "Desync edges", settings->collisionViewerGhostEdges));
 
 				case GUIElementEnum::collisionViewerGhostEdgesSuspectGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("Only highlight stale / over-credited polygons (hides the routine skipped ones, e.g. floor seams)."), std::nullopt, "  Edges: suspect only", settings->collisionViewerGhostEdgesSuspect));
+						(game, ToolTipCollection("Only highlight stale / over-credited polygons (hides the routine skipped ones, e.g. floor seams)."), std::nullopt, "Offset polygons only", settings->collisionViewerGhostEdgesSuspect));
 
 				case GUIElementEnum::collisionViewerGhostShowRealGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("Draw the capsule where Havok really is. Turn off to see only the desync poses (believed / rewind / trail) without the overlap."), std::nullopt, "  Show real capsule", settings->collisionViewerGhostShowReal));
+						(game, ToolTipCollection("Draw the capsule where Havok really is. Turn off to see only the desync poses (believed / rewind / trail) without the overlap."), std::nullopt, "Show real capsule", settings->collisionViewerGhostShowReal));
 
 				case GUIElementEnum::collisionViewerGhostColNormalGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUIColourPicker<true>>
-						(game, ToolTipCollection("Colour of your real Havok capsule (and trail) while nothing is desynced."), "  Capsule colour", settings->collisionViewerGhostColNormal));
+						(game, ToolTipCollection("Colour of your real Havok capsule (and trail) while nothing is desynced."), "Capsule color", settings->collisionViewerGhostColNormal));
 
 				case GUIElementEnum::collisionViewerGhostColDesyncGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUIColourPicker<true>>
-						(game, ToolTipCollection("Colour of your real Havok capsule (and trail ticks) while a backstep is active or a nearby polygon is stale/over-credited."), "  Desync capsule colour", settings->collisionViewerGhostColDesync));
+						(game, ToolTipCollection("Colour of your real Havok capsule (and trail ticks) while a backstep is active or a nearby polygon is stale/over-credited."), "Desync capsule color", settings->collisionViewerGhostColDesync));
 
 				case GUIElementEnum::collisionViewerGhostColBelievedGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUIColourPicker<true>>
-						(game, ToolTipCollection("Colour of the believed-pose capsules (where the over-credited TIMs think you are)."), "  Believed pose colour", settings->collisionViewerGhostColBelieved));
+						(game, ToolTipCollection("Colour of the believed-pose capsules (where the over-credited TIMs think you are)."), "Believed pose color", settings->collisionViewerGhostColBelieved));
 
 				case GUIElementEnum::collisionViewerGhostVehiclesGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("While you're in a vehicle (any seat), show the vehicle's Havok body and its TIM/backstep desync instead of your biped's; back to your biped when you get out."), std::nullopt, "  Follow vehicle when seated", settings->collisionViewerGhostVehicles));
+						(game, ToolTipCollection("While you're in a vehicle (any seat), show the vehicle's Havok body and its TIM/backstep desync instead of your biped's; back to your biped when you get out."), std::nullopt, "Follow vehicle when seated", settings->collisionViewerGhostVehicles));
 
 				case GUIElementEnum::collisionViewerCreasesGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
@@ -1261,7 +1360,7 @@ private:
 
 				case GUIElementEnum::collisionViewerGhostLogGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("While Ghost debug is on, writes every backstep, detected rewind and TIM over-credit episode to GhostDesyncLog_<date>.jsonl next to HCMInternal.dll: map, tick, body position / PREV / CUR, velocity and integrate velocity, S, the over-credited polygon (world/instanced, surface, flags, material, vertices, normal, centroid), TIM, true distance, over-credit, the believed-shift direction, normal.velocity, and the surfaces you were touching. One JSON object per line. Turning it off closes the file; on again starts a new one."), std::nullopt, "  Desync logger", settings->collisionViewerGhostLog));
+						(game, ToolTipCollection("While Ghost debug is on, writes every backstep, detected rewind and TIM over-credit episode to GhostDesyncLog_<date>.jsonl next to HCMInternal.dll: map, tick, body position / PREV / CUR, velocity and integrate velocity, S, the over-credited polygon (world/instanced, surface, flags, material, vertices, normal, centroid), TIM, true distance, over-credit, the believed-shift direction, normal.velocity, and the surfaces you were touching. One JSON object per line. Turning it off closes the file; on again starts a new one."), std::nullopt, "Desync logger", settings->collisionViewerGhostLog));
 
 				case GUIElementEnum::collisionViewerLineWidthGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUIFloat<SliderParam<float>(1.f, 8.f)>>
@@ -1302,7 +1401,7 @@ private:
 
 				case GUIElementEnum::chaseCameraToggleGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<true>>
-						(game, ToolTipCollection("Forces the engine's own third-person chase camera (the one it uses for vehicles) on you while you are on foot - Halo 2, Halo 3, Halo 3: ODST, Halo: Reach and Halo 4. Uses the game's own camera code and blend, and goes straight back to first person when turned off. Aim follows the camera. MCC build 1.3528 only. While Free Camera is on you see the free camera; the chase camera returns when Free Camera is turned off."), std::nullopt, "Chase Camera", settings->chaseCameraToggle
+						(game, ToolTipCollection("Forces the engine's own third-person chase camera (the one it uses for vehicles) on you while you are on foot - Halo 2, Halo 3, Halo 3: ODST, Halo: Reach and Halo 4. Uses the game's own camera code and blend, and goes straight back to first person when turned off. Aim follows the camera. MCC build 1.3528 only. While Free Camera is on you see the free camera; the chase camera returns when Free Camera is turned off."), RebindableHotkeyEnum::chaseCamera, "Chase Camera", settings->chaseCameraToggle
 						));
 
 				case GUIElementEnum::h2ArmorColourToggle:

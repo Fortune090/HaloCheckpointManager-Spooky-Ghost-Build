@@ -61,7 +61,10 @@ abilityMeterToggleHotkey,\
 sensResetCountHotkey,\
 sensDriftOverlayToggleHotkey,\
 toggleViewAngleLine3D,\
-shieldInputPrinterToggleHotkey
+shieldInputPrinterToggleHotkey,\
+chaseCamera,\
+offsetSave,\
+offsetLoad
 
 
 

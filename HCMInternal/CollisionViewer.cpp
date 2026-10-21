@@ -62,6 +62,7 @@ private:
 	std::weak_ptr<IMCCStateHook> mccStateWeak;
 
 	ScopedCallback<ToggleEvent> mToggleCallback;
+	ScopedCallback<ActionEvent> mOffsetSaveCallback, mOffsetLoadCallback;   // Halo 2 offset save state
 	std::unique_ptr<ScopedCallback<DirectXRenderEvent>> mRenderCallback;
 	std::unique_ptr<ModuleInlineHook> mFpHook, mResolveHook;
 	std::shared_ptr<MultilevelPointer> mFp3Ptr;     // Halo 3 / ODST first-person pass (InternalPointerData.xml collisionViewerFirstPersonPass)
@@ -196,6 +197,15 @@ private:
 		v.ghostColBelieved = packColour(s.collisionViewerGhostColBelieved->GetValue());
 		v.ghost = s.collisionViewerGhost->GetValue();
 		v.ghostBelieved = s.collisionViewerGhostBelieved->GetValue();
+		v.ghostBelievedObjects = s.collisionViewerGhostBelievedObjects->GetValue();
+		v.ghostLinkLabels = s.collisionViewerGhostLinkLabels->GetValue();
+		v.ghostPass = s.collisionViewerGhostPass->GetValue();
+		v.offsetNaturalReverts = s.collisionViewerOffsetNaturalReverts->GetValue();
+		v.ghostTravel = s.collisionViewerGhostTravel->GetValue();
+		v.ghostTravelObjects = s.collisionViewerGhostTravelObjects->GetValue();
+		v.weldZonesNear = s.collisionViewerWeldZonesNear->GetValue();
+		v.weldZonesWelded = s.collisionViewerWeldZonesWelded->GetValue();
+		v.weldZoneRange = s.collisionViewerWeldZoneRange->GetValue();
 		v.ghostTrail = s.collisionViewerGhostTrail->GetValue();
 		v.ghostRewind = s.collisionViewerGhostRewind->GetValue();
 		v.ghostJump = s.collisionViewerGhostJump->GetValue();
@@ -307,8 +317,16 @@ public:
 		mSlot(slotOf(game)),
 		mCvGame(game == GameState(GameState::Value::Halo3) ? h2cv::Game::Halo3 : game == GameState(GameState::Value::Halo3ODST) ? h2cv::Game::Halo3ODST : h2cv::Game::Halo2),
 		mToggleCallback(dicon.Resolve<SettingsStateAndEvents>().lock()->collisionViewerToggle->valueChangedEvent,
-			[this](bool& on) { onToggle(on); })
+			[this](bool& on) { onToggle(on); }),
+		mOffsetSaveCallback(dicon.Resolve<SettingsStateAndEvents>().lock()->offsetSaveEvent,
+			[this]() { if (!mIsH3 && isActiveGame()) mViewer.requestOffsetSave(); }),
+		mOffsetLoadCallback(dicon.Resolve<SettingsStateAndEvents>().lock()->offsetLoadEvent,
+			[this]() { if (!mIsH3 && isActiveGame()) mViewer.requestOffsetLoad(); })
 	{
+		// offset save state: the viewer triggers HCM's own force checkpoint / force revert (unchanged) and reports here
+		mViewer.fireCheckpoint = [w = settingsWeak]() { if (auto s = w.lock()) s->forceCheckpointEvent->operator()(); };
+		mViewer.fireRevert = [w = settingsWeak]() { if (auto s = w.lock()) s->forceRevertEvent->operator()(); };
+		mViewer.message = [w = messagesWeak](std::string msg) { if (auto m = w.lock()) m->addMessage(msg); };
 		if (mIsH3)
 		{
 			// A missing XML entry throws HCMInitException here -> the cheat is unavailable for this game build and its GUI rows grey out.
