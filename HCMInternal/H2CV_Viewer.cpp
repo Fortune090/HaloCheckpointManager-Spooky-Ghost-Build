@@ -10,6 +10,8 @@
 #include <cmath>
 #include <cstdio>
 #include <algorithm>
+#include <string>
+#include <unordered_map>
 
 namespace h2cv
 {
@@ -165,6 +167,50 @@ namespace h2cv
 			case h2::Biped: return "biped"; case h2::Vehicle: return "vehicle"; case h2::Weapon: return "weapon"; case h2::Equipment: return "equipment";
 			case h2::Scenery: return "scenery"; case h2::Machine: return "machine"; case h2::Crate: return "crate"; default: return "object";
 			}
+		}
+
+		// sleep countdown: "your biped" / "crate 0xE1A20005 3.2 wu" (the owning object is looked up at most once a second)
+		std::string sleepBodyLabel(const h2::SleepBody& b)
+		{
+			if (b.player) return "your biped";
+			static std::unordered_map<uintptr_t, std::pair<uint64_t, std::string>> cache;
+			const uint64_t now = GetTickCount64();
+			auto it = cache.find(b.entity);
+			if (it == cache.end() || now - it->second.first > 1000)
+			{
+				if (cache.size() > 256) cache.clear();
+				h2::ObjectRef o{};
+				char name[64] = "body";
+				if (h2::objectOfEntity(b.entity, o)) snprintf(name, sizeof(name), "%s 0x%08X", objTypeName(o.type), o.datum);
+				it = cache.insert_or_assign(b.entity, std::make_pair(now, std::string(name))).first;
+			}
+			char buf[96];
+			snprintf(buf, sizeof(buf), "%s %.1f wu", it->second.second.c_str(), b.distance);
+			return buf;
+		}
+
+		// "your biped moved 0.0340 / 0.0200 wu" - whichever measure is nearer (or past) its limit
+		std::string sleepBodyList(const std::vector<h2::SleepBody>& v)
+		{
+			std::string out;
+			for (size_t i = 0; i < v.size() && i < 3; ++i)
+			{
+				const h2::SleepBody& x = v[i];
+				const std::string name = sleepBodyLabel(x);
+				char b[192];
+				if (x.veto) snprintf(b, sizeof(b), "%s%s (kept awake by the game)", i ? ", " : "", name.c_str());
+				else if (x.kind == h2::Deact::Fake) snprintf(b, sizeof(b), "%s%s (fake deactivator)", i ? ", " : "", name.c_str());
+				else if (x.kind == h2::Deact::None) snprintf(b, sizeof(b), "%s%s (no deactivator)", i ? ", " : "", name.c_str());
+				else
+				{
+					const bool byTurn = x.turnedMax > 0.f && (x.movedMax <= 0.f || x.turned / x.turnedMax > x.moved / x.movedMax);
+					if (byTurn) snprintf(b, sizeof(b), "%s%s turned %.4f / %.4f", i ? ", " : "", name.c_str(), x.turned, x.turnedMax);
+					else snprintf(b, sizeof(b), "%s%s moved %.4f / %.4f wu", i ? ", " : "", name.c_str(), x.moved, x.movedMax);
+				}
+				out += b;
+			}
+			if (v.size() > 3) out += " +" + std::to_string(v.size() - 3) + " more";
+			return out;
 		}
 
 		// Every TIM-carrying leaf of an object's shape tree (walked in parallel with the agent tree, prims / bsps in WORLD space)
@@ -328,6 +374,7 @@ namespace h2cv
 
 	void Viewer::shutdown()
 	{
+		sb::reset();   // superbounce viewer: closes its log
 		restoreBloom();
 		mR.shutdown();
 		mRtv = nullptr; mCtx = nullptr; mDev = nullptr;
@@ -688,8 +735,27 @@ namespace h2cv
 					// same measure as drawTim(): true gap between the primitive's surface and the polygon surface
 					float gap = 1e9f;
 					for (const h2::ShapePrim* pr : grp.prims) gap = std::min(gap, primSurfaceDist(*pr, pose, poly));
-					const float trueDist = gap - 0.01f;
-					const float over = trueDist > -0.5f ? k.tim - (trueDist - 1.1f * kTol) : 0.f;
+					// The side this TIM belongs to: the side of the polygon you were on when it was first seen, kept while the
+					// TIM lives (the same record the pass-through prediction uses). The engine keeps believing you are on
+					// that side at distance TIM even after you have crossed the polygon, so once your centre is through, the
+					// gap is measured SIGNED along that side's normal (negative = how far through) - over-credit and the
+					// believed pose then stay put instead of mirroring when you cross back and forth.
+					const Vec3 smid = sj.vehicle ? gMid : mid;
+					Vec3 n0 = norm(cross(sub(poly[1], poly[0]), sub(poly[2], poly[0])));
+					{
+						Vec3 pc{}; for (const auto& v : poly) pc = add(pc, v); pc = mul(pc, 1.f / (float)poly.size());
+						if (passSide(((uint64_t)u << 40) | (uint64_t)k.key, dot(n0, sub(smid, pc)) >= 0) < 0) n0 = mul(n0, -1.f);
+					}
+					const float sAbove = dot(sub(smid, poly[0]), n0);
+					const h2::ShapePrim& sp = *grp.prims[0];
+					const bool crossed = sAbove < 0.f && sp.capsule;
+					float trueDist = gap - 0.01f;
+					if (crossed)
+					{
+						const Vec3 wa = h2::xfPoint(pose, sp.a), wb = h2::xfPoint(pose, sp.b);
+						trueDist = sAbove - (sp.r + 0.5f * std::fabs(dot(sub(wa, wb), n0))) - 0.01f;
+					}
+					const float over = (crossed || trueDist > -0.5f) ? k.tim - (trueDist - 1.1f * kTol) : 0.f;
 					const bool stale = trueDist < kTol;                 // GSK would report a contact, the cache still skips it
 					const bool suspect = over > overMin || stale;
 					if (suspect) ++gi.nSuspect;
@@ -789,9 +855,10 @@ namespace h2cv
 					}
 					if (over > overMin && belMax > 0)
 					{
-						Vec3 n = norm(cross(sub(poly[1], poly[0]), sub(poly[2], poly[0])));
-						const float side = dot(sub(sj.vehicle ? gMid : mid, poly[0]), n);
-						if (std::fabs(side) < 1e-6f) n = norm(k.normal); else if (side < 0) n = mul(n, -1.f);   // away from the polygon, on the body's side
+						// along the cached separating normal (what the TIM is measured along; differs from the plane normal at
+						// edges / corners), on the TIM's kept side n0 - so it does not mirror when you cross the polygon
+						Vec3 n = n0;
+						if (len(k.normal) > 0.5f) { n = norm(k.normal); if (dot(n, n0) < 0) n = mul(n, -1.f); }
 						bel.push_back({ over, n });
 					}
 				}
@@ -902,7 +969,14 @@ namespace h2cv
 						if (h.bspPoly) { for (size_t i = 0; i < h.poly.size(); ++i) addLine(dst, h.poly[i], h.poly[(i + 1) % h.poly.size()], col); }
 						else { static const h2::Xf I{}; primWire(dst, h.prim, I, zero, col); }
 					}
-					if (h.over > overMin && belMax > 0) belObj.push_back({ h.over, h.dir });
+					if (h.over > overMin && belMax > 0)
+					{
+						// the piece's kept side (decided when the TIM was first seen, same record as pass-through), along the
+						// cached normal - so it does not mirror when your centre passes the piece
+						Vec3 n = len(h.k.normal) > 0.5f ? norm(h.k.normal) : h.dir;
+						if (passSide(((uint64_t)u << 40) | (1ull << 39) | (h.id & ((1ull << 39) - 1)), dot(n, h.dir) >= 0) < 0) n = mul(n, -1.f);
+						belObj.push_back({ h.over, n });
+					}
 					// pass-through prediction against this object piece: a collision_bsp polygon uses the polygon rule;
 					// a convex piece needs the centre past the piece's middle along the TIM normal (TIM is spent only along n)
 					if (settings.ghostPass && !sj.vehicle && h.over > overMin && h.k.tim > 0.f && h.k.manifold == 0 && !body.prims.empty() && body.prims[0].capsule)
@@ -1678,6 +1752,7 @@ namespace h2cv
 		// the death bar shows whichever kill comes first: the out-of-bounds count (16 ticks once it starts) or the turn of a
 		// kill volume you are inside (its check comes round every `count` ticks); worked out at the end of this function
 		mOobBar = -1.f; mOobBarText[0] = 0;
+		mDetectTicks = (mKill.oob.valid && mKill.oob.counter == 0) ? mKill.oob.nextCheck : -1;
 		int bestTicks = INT32_MAX; float bestFrac = -1.f;
 		auto offer = [&](int ticksLeft, int period, const char* what)
 		{
@@ -1690,7 +1765,8 @@ namespace h2cv
 		if (mKill.oob.valid && mKill.oob.counter > 0)
 		{
 			const int total = mKill.oob.limit + 1;
-			offer(total - mKill.oob.counter, total, "OUT OF BOUNDS");
+			// past the limit (kill blocked - invulnerability etc.) the count keeps climbing: show 0, empty and red
+			offer(std::max(0, total - mKill.oob.counter), total, mKill.oob.counter > total ? "OUT OF BOUNDS (kill blocked)" : "OUT OF BOUNDS");
 		}
 		std::vector<h2::KillVolume> kvs;
 		if (!h2::readKillVolumes(kvs)) { mKill.note = "scenario not readable"; publishBar(); return; }
@@ -1816,6 +1892,31 @@ namespace h2cv
 		// the touched / skipped polygons are the point of the overlay: draw them on top, thicker
 		mR.drawLines(mScratch.data(), mScratch.size(), settings.lineWidth + 1.5f, 0.f, false, false, 0.f);
 		mR.drawLines(featLines.data(), featLines.size(), settings.lineWidth + 4.0f, 0.f, false, false, 0.f);
+	}
+
+	// superbounce viewer (Halo 2): the module reads the local player and the level and returns its lines, labels, panel
+	// section and HUD state; drawn without occlusion (like the ghost overlays), labels projected here and drawn at Present
+	void Viewer::drawSuperbounce()
+	{
+		sb::Options o;
+		o.on = settings.superbounce;                  // off: only the charge options run (nothing drawn)
+		o.forceCharge = settings.sbForceCharge;
+		o.seamText = settings.sbSeamText;
+		o.debounce = settings.sbDebounce;
+		o.record = settings.sbRecord;
+		o.highlight = settings.sbHighlight;
+		o.keepCharge = settings.sbKeepCharge;
+		sb::frame(mWorld, o, mSb);
+		if (!mSb.message.empty() && message) message(mSb.message);
+		if (!mSb.thin.empty()) mR.drawLines(mSb.thin.data(), mSb.thin.size(), 1.5f, 0.f, false, false, 0.f);
+		if (!mSb.thick.empty()) mR.drawLines(mSb.thick.data(), mSb.thick.size(), 3.f, 0.f, false, false, 0.f);
+		mSbLabels.clear();
+		for (const auto& L : mSb.labels)
+		{
+			float x, y;
+			if (!mR.project(L.at, x, y)) continue;
+			mSbLabels.push_back({ x * mLabelScaleX, y * mLabelScaleY, L.rgba, L.text });
+		}
 	}
 
 	void Viewer::drawHud(const h2::Camera& cam)
@@ -1975,7 +2076,7 @@ namespace h2cv
 				{
 					if (oob.counter > 0)
 						ImGui::TextColored(ImVec4(0.47f, 0.86f, 1.f, 1.f), "OUT OF BOUNDS (your body is inside solid / outside the level): %d of %d ticks - killed in %d ticks (%.2f s)",
-							oob.counter, oob.limit + 1, oob.limit + 1 - oob.counter, (oob.limit + 1 - oob.counter) / (float)oob.ticksPerSec);
+							oob.counter, oob.limit + 1, std::max(0, oob.limit + 1 - oob.counter), std::max(0, oob.limit + 1 - oob.counter) / (float)oob.ticksPerSec);
 					else
 						ImGui::TextDisabled("OUT OF BOUNDS: not counting. The check starts only on ticks where (tick + player index %u) %% 16 == 0 - next in %d ticks; then %d ticks in a row kill",
 							oob.playerIndex, oob.nextCheck, oob.limit + 1);
@@ -2015,6 +2116,12 @@ namespace h2cv
 			}
 			ImGui::Separator();
 			ImGui::TextDisabled("options: HCM menu > Overlays > Collision Viewer");
+			// superbounce viewer (Halo 2): its section of the panel
+			if (settings.superbounce && settings.infoSuperbounce && !mSb.panel.empty())
+			{
+				ImGui::Separator();
+				for (const auto& l : mSb.panel) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(l.rgba), "%s", l.text.c_str());
+			}
 		}
 		ImGui::End();
 		(void)cam;
@@ -2084,7 +2191,8 @@ namespace h2cv
 		// Halo 2: the stored projection is standard-Z while the depth buffer holds 1 - z/w (flip applied in gameViewProj).
 		// Halo 3 / ODST: the engine builds the projection for the depth convention in use (reversed when its byte is set) - used as stored.
 		const bool reversed = h3g ? h3::depthReversed() : settings.gameZReversed.load();
-		const bool wantObjects = settings.show[(int)Cat::Scenery] || settings.show[(int)Cat::Crate] || settings.show[(int)Cat::Machine];
+		const bool wantObjects = settings.show[(int)Cat::Scenery] || settings.show[(int)Cat::Crate] || settings.show[(int)Cat::Machine]
+			|| (settings.superbounce && !isH3());   // the superbounce viewer measures their seams too
 		if (h3g) mWorld.setWantCreases(settings.creases);
 		mWorld.update(wantObjects, settings.show[(int)Cat::Breakable]);
 		if (!mWorld.valid()) return false;
@@ -2097,6 +2205,7 @@ namespace h2cv
 			if (settings.tim) drawTim3();
 			if (settings.pills) drawPills3();
 			if (settings.ghost) drawGhost3();
+			if (settings.killVolumes) drawDeath3(); else { mOobBar = -1.f; mDetectTicks = -1; }
 		}
 		else
 		{
@@ -2106,6 +2215,7 @@ namespace h2cv
 			else if (mOffsetReq.exchange(0) && message) message("Offset save / load needs Ghost debug on (Halo 2).");
 			if (settings.weldZonesNear || settings.weldZonesWelded) drawWeldZones();
 			if (settings.killVolumes) drawKillVolumes();
+			if (superbounceActive()) drawSuperbounce();
 		}
 		mR.end();
 		return true;
@@ -2176,6 +2286,154 @@ namespace h2cv
 		mLabelScaleX = sx; mLabelScaleY = sy;
 	}
 
+	// out-of-bounds timer bars (death bar + detection bar), drawn from mOobBar / mOobBarText / mDetectTicks
+	void Viewer::drawBars(ImDrawList* dl)
+	{
+		// out-of-bounds timer bars, each placed by its own anchor corner / offset / size (Out-of-bounds timer bar settings)
+		auto barRect = [](int anchor, float ox, float oy, float w, float h, ImVec2& a, ImVec2& b)
+		{
+			const ImGuiIO& io = ImGui::GetIO();
+			const float W = io.DisplaySize.x, H = io.DisplaySize.y;
+			const float x = (anchor == 1 || anchor == 2) ? W - ox - w : ox;
+			const float y = (anchor == 2 || anchor == 3) ? H - oy - h : oy;
+			a = ImVec2(x, y); b = ImVec2(x + w, y + h);
+		};
+		// death bar: whichever kill comes first, full / green draining to red, label above
+		if (settings.killVolumes && mOobBar >= 0.f)
+		{
+			ImVec2 a, b;
+			barRect(settings.oobAnchor, settings.oobX, settings.oobY, std::max(20.f, settings.oobW.load()), std::max(2.f, settings.oobH.load()), a, b);
+			const float w = b.x - a.x;
+			const float f = mOobBar;
+			const ImU32 fill = IM_COL32((int)(255.f * (1.f - f)), (int)(220.f * f + 35.f * (1.f - f)), 40, 235);
+			dl->AddRectFilled(ImVec2(a.x - 3, a.y - 3), ImVec2(b.x + 3, b.y + 3), IM_COL32(0, 0, 0, 170), 4.f);
+			dl->AddRectFilled(a, ImVec2(a.x + w * f, b.y), fill, 3.f);
+			dl->AddRect(a, b, IM_COL32(255, 255, 255, 120), 3.f, 0, 1.5f);
+			if (mOobBarText[0])
+			{
+				const ImVec2 ts = ImGui::CalcTextSize(mOobBarText);
+				const ImVec2 tp((a.x + b.x) * 0.5f - ts.x * 0.5f, a.y - ts.y - 6.f);
+				dl->AddRectFilled(ImVec2(tp.x - 4, tp.y - 2), ImVec2(tp.x + ts.x + 4, tp.y + ts.y + 2), IM_COL32(0, 0, 0, 170), 3.f);
+				dl->AddText(tp, fill | 0xFF000000u, mOobBarText);
+			}
+		}
+		// detection bar: ticks until the next 16-tick out-of-bounds check while nothing is counting, label below
+		if (settings.killVolumes && mDetectTicks >= 0)
+		{
+			ImVec2 a, b;
+			barRect(settings.detectAnchor, settings.detectX, settings.detectY, std::max(20.f, settings.detectW.load()), std::max(2.f, settings.detectH.load()), a, b);
+			const float w = b.x - a.x;
+			const float f = std::clamp(mDetectTicks / 16.f, 0.f, 1.f);
+			const ImU32 fill = mDetectTicks == 0 ? IM_COL32(255, 255, 255, 240) : IM_COL32(70, 160, 255, 230);
+			dl->AddRectFilled(ImVec2(a.x - 3, a.y - 3), ImVec2(b.x + 3, b.y + 3), IM_COL32(0, 0, 0, 170), 4.f);
+			dl->AddRectFilled(a, ImVec2(a.x + w * f, b.y), fill, 3.f);
+			dl->AddRect(a, b, IM_COL32(255, 255, 255, 110), 3.f, 0, 1.5f);
+			char txt[48]; snprintf(txt, sizeof(txt), mDetectTicks == 0 ? "OOB CHECK NOW" : "OOB check in %d ticks", mDetectTicks);
+			const ImVec2 ts = ImGui::CalcTextSize(txt);
+			const ImVec2 tp((a.x + b.x) * 0.5f - ts.x * 0.5f, b.y + 5.f);
+			dl->AddRectFilled(ImVec2(tp.x - 4, tp.y - 2), ImVec2(tp.x + ts.x + 4, tp.y + ts.y + 2), IM_COL32(0, 0, 0, 170), 3.f);
+			dl->AddText(tp, IM_COL32(150, 200, 255, 255), txt);
+		}
+	}
+
+	// Halo 2: your physics island and the nearest others - ticks until each falls asleep if nothing in it moves (see
+	// h2::readIslandSleep). Sleeping ends an island's collision agents, so this is also how long a still offset lasts.
+	void Viewer::drawSleepCountdown()
+	{
+		const uintptr_t unit = h2::localPlayerUnitObject();
+		Vec3 pp{};
+		if (unit) { float f[3]; if (mem::copy(f, unit + 0x64, 12)) pp = { f[0], f[1], f[2] }; }
+		std::vector<h2::IslandSleep> isl; std::string note;
+		h2::readIslandSleep(unit, pp, isl, note);
+		const ImGuiIO& io = ImGui::GetIO();
+		ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.42f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.f));
+		ImGui::SetNextWindowBgAlpha(0.55f);
+		if (ImGui::Begin("Havok sleep##h2cv", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
+			ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoTitleBar))
+		{
+			if (!note.empty()) ImGui::TextDisabled("Havok sleep: %s", note.c_str());
+			for (const auto& s : isl)
+			{
+				const char* who = s.hasPlayer ? "YOUR island" : "island";
+				if (!s.active)
+				{
+					ImGui::TextColored(ImVec4(0.6f, 0.6f, 1.f, 1.f), "%s (%d bod%s, %.1f wu): ASLEEP", who, s.bodies, s.bodies == 1 ? "y" : "ies", s.distance);
+					continue;
+				}
+				if (!s.never.empty())
+				{
+					// a body without a (real) deactivator answers "not quiet" at every check: this island cannot fall asleep
+					ImGui::TextColored(ImVec4(0.75f, 0.75f, 0.75f, 1.f), "%s (%d bod%s, %.1f wu): never sleeps on its own   [quiet rounds %d/5, next check %d, long check %d]",
+						who, s.bodies, s.bodies == 1 ? "y" : "ies", s.distance, std::min(s.rounds, 5), s.ticksToA, s.ticksToB);
+					ImGui::TextColored(ImVec4(1.f, 0.45f, 0.45f, 1.f), "    never quiet: %s", sleepBodyList(s.never).c_str());
+				}
+				else
+				{
+					const ImVec4 c = s.ticksToSleep <= 3 ? ImVec4(1.f, 0.35f, 0.35f, 1.f) : s.ticksToSleep <= 15 ? ImVec4(1.f, 0.85f, 0.2f, 1.f) : ImVec4(0.75f, 0.9f, 1.f, 1.f);
+					ImGui::TextColored(c, "%s (%d bod%s, %.1f wu): sleeps in %d ticks if still   [quiet rounds %d/5, next check %d, long check %d%s]",
+						who, s.bodies, s.bodies == 1 ? "y" : "ies", s.distance, s.ticksToSleep, std::min(s.rounds, 5), s.ticksToA, s.ticksToB,
+						s.longSleeps ? ": would pass" : "");
+					if (!s.failing.empty())
+						ImGui::TextColored(ImVec4(1.f, 0.62f, 0.25f, 1.f), "    next check will not count: %s", sleepBodyList(s.failing).c_str());
+					else if (s.haveClosest)
+						ImGui::TextColored(ImVec4(0.55f, 0.9f, 0.55f, 1.f), "    next check counts - closest: %s", sleepBodyList({ s.closest }).c_str());
+				}
+				if (s.haveCheck)
+				{
+					const char* ago = s.checkAge == 1 ? "" : "s";
+					if (!s.awake.empty())
+						ImGui::TextColored(ImVec4(0.85f, 0.7f, 0.5f, 1.f), "    last check %d tick%s ago: NOT quiet - %s  (did not count)", s.checkAge, ago, sleepBodyList(s.awake).c_str());
+					else
+						ImGui::TextColored(ImVec4(0.6f, 0.8f, 0.6f, 1.f), "    last check %d tick%s ago: all %d quiet (counted)", s.checkAge, ago, s.asked);
+				}
+			}
+			const h2::QuietLimits lim = h2::playerQuietLimits();
+			if (lim.valid)
+				ImGui::TextDisabled("quiet = moved and turned less than %.4f / %.4f since the last sample (long check: %.4f / %.4f)",
+					lim.moved, lim.turned, lim.longMoved, lim.longTurned);
+		}
+		ImGui::End();
+	}
+
+	// Halo: Reach - no Collision Viewer, just the out-of-bounds bars and the panel's out-of-bounds line
+	void Viewer::onRenderReach()
+	{
+		mOobBar = -1.f; mOobBarText[0] = 0; mDetectTicks = -1;
+		hr::Death d;
+		if (settings.killVolumes || (settings.hud && settings.infoKill)) hr::readDeath(d);
+		if (settings.killVolumes && d.valid)
+		{
+			if (d.counter > 0)
+			{
+				const int total = d.limit + 1;
+				const int left = std::max(0, total - d.counter);   // can run past the limit when the kill is blocked (invulnerability)
+				mOobBar = std::clamp((float)left / (float)total, 0.f, 1.f);
+				snprintf(mOobBarText, sizeof(mOobBarText), d.counter > total ? "OUT OF BOUNDS (kill blocked) - %d ticks" : "OUT OF BOUNDS - %d ticks", left);
+			}
+			else mDetectTicks = d.nextCheck;
+		}
+		ImDrawList* dl = ImGui::GetBackgroundDrawList();
+		drawBars(dl);
+		if (settings.hud && settings.infoKill)
+		{
+			ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 12.f, 12.f), ImGuiCond_Always, ImVec2(1.f, 0.f));
+			ImGui::SetNextWindowBgAlpha(0.55f);
+			if (ImGui::Begin("Collision Viewer##reach", nullptr, ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_AlwaysAutoResize |
+				ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav))
+			{
+				if (!d.valid) ImGui::TextDisabled("OUT OF BOUNDS: %s", d.note.empty() ? "-" : d.note.c_str());
+				else if (d.counter > 0)
+					ImGui::TextColored(ImVec4(0.47f, 0.86f, 1.f, 1.f), "OUT OF BOUNDS: %d of %d ticks - killed in %d ticks (resets the first tick you are back in bounds)",
+						d.counter, d.limit + 1, std::max(0, d.limit + 1 - d.counter));
+				else
+					ImGui::TextDisabled("OUT OF BOUNDS: not counting. The check starts only on ticks where (tick + player index %u) %% 16 == 0 - next in %d ticks; then %d ticks in a row kill",
+						d.playerIndex, d.nextCheck, d.limit + 1);
+				ImGui::TextDisabled("KILL VOLUMES: Reach tests every kill volume you are in on every check - no rotation, no countdown");
+			}
+			ImGui::End();
+		}
+	}
+
 	void Viewer::onRender(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t w, uint32_t h)
 	{
 		if (!mDev && !initDevice(dev, ctx)) return;
@@ -2195,7 +2453,7 @@ namespace h2cv
 		mInFrameThisFrame = false;
 		if (engineDrew) mLastInFramePresent = mPresentCount;
 		if (!engineMode) { mInFrameNote.clear(); setBloomSuppressed(false); }
-		else if (!engineDrew && mPresentCount - mLastInFramePresent > 2)
+		else if (!engineDrew && mPresentCount - mLastInFramePresent > 2 && settings.collision)
 		{
 			// the hooks did not draw (remastered graphics, menu, cinematic, texture camera): fall back to own depth
 			mInFrameNote = mInFrameCount == 0
@@ -2205,10 +2463,17 @@ namespace h2cv
 		}
 		else mInFrameNote.clear();
 
-		if (gameOk && cam.ok && !(engineMode && (engineDrew || mPresentCount - mLastInFramePresent <= 2)))
+		if (gameOk && !settings.collision && !superbounceActive())   // the superbounce viewer and its charge options: Halo 2 only
+		{
+			// Collision Viewer off, info panel / out-of-bounds bar on: no world drawing, just keep the bars current
+			if (settings.killVolumes) { if (isH3()) drawDeath3(); else drawKillVolumes(); }
+			else { mOobBar = -1.f; mDetectTicks = -1; }
+		}
+		else if (gameOk && cam.ok && !(engineMode && (engineDrew || mPresentCount - mLastInFramePresent <= 2)))
 		{
 			const bool own = occ != (int)Occlusion::XRay;
-			const bool wantObjects = (own && !isH3()) || settings.show[(int)Cat::Scenery] || settings.show[(int)Cat::Crate] || settings.show[(int)Cat::Machine];
+			const bool wantObjects = (own && !isH3()) || settings.show[(int)Cat::Scenery] || settings.show[(int)Cat::Crate] || settings.show[(int)Cat::Machine]
+				|| (settings.superbounce && !isH3());   // the superbounce viewer measures their seams too
 			if (isH3()) mWorld.setWantCreases(settings.creases);
 			mWorld.update(wantObjects, settings.show[(int)Cat::Breakable]);
 			mLabelScaleX = mLabelScaleY = 1.f;
@@ -2245,21 +2510,26 @@ namespace h2cv
 						mR.drawOccluders(caps);
 					}
 				}
-				drawCollision(cam.pos, own);
+				if (settings.collision) drawCollision(cam.pos, own);
 				if (isH3())
 				{
 					if (settings.tim) drawTim3();
 					if (settings.pills) drawPills3();
 					if (settings.ghost) drawGhost3();
+					if (settings.killVolumes) drawDeath3(); else { mOobBar = -1.f; mDetectTicks = -1; }
 				}
 				else
 				{
-					if (settings.tim) drawTim();
-					if (settings.pills) drawPills();
-					if (settings.ghost) drawGhost();
-					else if (mOffsetReq.exchange(0) && message) message("Offset save / load needs Ghost debug on (Halo 2).");
-					if (settings.weldZonesNear || settings.weldZonesWelded) drawWeldZones();
+					if (settings.collision)
+					{
+						if (settings.tim) drawTim();
+						if (settings.pills) drawPills();
+						if (settings.ghost) drawGhost();
+						else if (mOffsetReq.exchange(0) && message) message("Offset save / load needs Ghost debug on (Halo 2).");
+						if (settings.weldZonesNear || settings.weldZonesWelded) drawWeldZones();
+					}
 					if (settings.killVolumes) drawKillVolumes();
+					if (superbounceActive()) drawSuperbounce();
 				}
 				mR.end();
 			}
@@ -2275,26 +2545,52 @@ namespace h2cv
 				dl->AddText(p, L.col | 0xFF000000u, L.text);
 			}
 			gLabels.clear();
-			// out-of-bounds kill bar (Kill volumes / out-of-bounds timer): big and colour-coded for peripheral vision
-			if (settings.killVolumes && mOobBar >= 0.f)
+			// superbounce viewer: its (long) labels, left-aligned at their point, and only CHARGED / not charged on the HUD
+			for (const auto& L : mSbLabels)
 			{
-				const ImGuiIO& io = ImGui::GetIO();
-				const float w = std::max(220.f, io.DisplaySize.x * 0.28f), h = std::max(14.f, io.DisplaySize.y * 0.018f);
-				const ImVec2 a(io.DisplaySize.x * 0.5f - w * 0.5f, io.DisplaySize.y * 0.30f), b(a.x + w, a.y + h);
-				const float f = mOobBar;
-				const ImU32 fill = IM_COL32((int)(255.f * (1.f - f)), (int)(220.f * f + 35.f * (1.f - f)), 40, 235);
-				dl->AddRectFilled(ImVec2(a.x - 3, a.y - 3), ImVec2(b.x + 3, b.y + 3), IM_COL32(0, 0, 0, 170), 4.f);
-				dl->AddRectFilled(a, ImVec2(a.x + w * f, b.y), fill, 3.f);
-				dl->AddRect(a, b, IM_COL32(255, 255, 255, 120), 3.f, 0, 1.5f);
-				if (mOobBarText[0])
+				const ImVec2 sz = ImGui::CalcTextSize(L.text.c_str());
+				dl->AddRectFilled(ImVec2(L.x - 2, L.y - 1), ImVec2(L.x + sz.x + 2, L.y + sz.y + 1), IM_COL32(0, 0, 0, 120), 3.f);
+				dl->AddText(ImVec2(L.x, L.y), L.col, L.text.c_str());
+			}
+			mSbLabels.clear();
+			if (settings.superbounce && gameOk && !isH3() && mSb.hud >= 0)
+			{
+				const char* t = mSb.hud ? "CHARGED" : "not charged";
+				const float size = ImGui::GetFontSize() * 1.6f;
+				const ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, 0.f, t);
+				const ImVec2 p(ImGui::GetIO().DisplaySize.x * 0.5f - ts.x * 0.5f, ImGui::GetIO().DisplaySize.y - ts.y - 48.f);
+				dl->AddRectFilled(ImVec2(p.x - 12, p.y - 6), ImVec2(p.x + ts.x + 12, p.y + ts.y + 6), IM_COL32(10, 10, 12, 170), 6.f);
+				dl->AddText(ImGui::GetFont(), size, p, mSb.hud ? IM_COL32(255, 90, 90, 255) : IM_COL32(170, 170, 170, 230), t);
 				{
-					// what will kill you first: out of bounds or a kill volume (and the ticks left), centred above the bar
-					const ImVec2 ts = ImGui::CalcTextSize(mOobBarText);
-					const ImVec2 tp(io.DisplaySize.x * 0.5f - ts.x * 0.5f, a.y - ts.y - 6.f);
-					dl->AddRectFilled(ImVec2(tp.x - 4, tp.y - 2), ImVec2(tp.x + ts.x + 4, tp.y + ts.y + 2), IM_COL32(0, 0, 0, 170), 3.f);
-					dl->AddText(tp, fill | 0xFF000000u, mOobBarText);
+					// bounces in a row (this chain, before you land) and this level's record, beside the indicator (placed from the
+					// wider "not charged", so it does not shift when the charge changes)
+					char l1[48], l2[48];
+					snprintf(l1, sizeof(l1), "Bounces in a row: %d", mSb.streak);
+					snprintf(l2, sizeof(l2), "Current level record: %d", mSb.record);
+					const float s3 = ImGui::GetFontSize() * 1.25f;
+					const ImVec2 w1 = ImGui::GetFont()->CalcTextSizeA(s3, FLT_MAX, 0.f, l1), w2 = ImGui::GetFont()->CalcTextSizeA(s3, FLT_MAX, 0.f, l2);
+					const float wide = ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, 0.f, "not charged").x;
+					const float x0 = ImGui::GetIO().DisplaySize.x * 0.5f + wide * 0.5f + 12.f + 16.f, bottom = p.y + ts.y + 6.f;
+					const float y2 = bottom - 6.f - w2.y, y1 = y2 - 4.f - w1.y;
+					dl->AddRectFilled(ImVec2(x0, y1 - 6.f), ImVec2(x0 + (std::max)(w1.x, w2.x) + 20.f, bottom), IM_COL32(10, 10, 12, 170), 6.f);
+					dl->AddText(ImGui::GetFont(), s3, ImVec2(x0 + 10.f, y1), mSb.streak > 0 ? IM_COL32(120, 255, 140, 255) : IM_COL32(235, 235, 235, 255), l1);
+					dl->AddText(ImGui::GetFont(), s3, ImVec2(x0 + 10.f, y2), IM_COL32(255, 210, 90, 255), l2);
+				}
+				if (settings.sbSpeed && mSb.speed >= 0.f)
+				{
+					// your speed just above it (the box sized for "888.8 u/s", so it does not jump as the digits change)
+					char sp[32];
+					snprintf(sp, sizeof(sp), "%.1f u/s", mSb.speed);
+					const float s2 = ImGui::GetFontSize() * 1.3f;
+					const ImVec2 bw = ImGui::GetFont()->CalcTextSizeA(s2, FLT_MAX, 0.f, "888.8 u/s");
+					const ImVec2 ss = ImGui::GetFont()->CalcTextSizeA(s2, FLT_MAX, 0.f, sp);
+					const float cx = ImGui::GetIO().DisplaySize.x * 0.5f, top = p.y - 6.f - 8.f - bw.y - 8.f;
+					dl->AddRectFilled(ImVec2(cx - bw.x * 0.5f - 10.f, top), ImVec2(cx + bw.x * 0.5f + 10.f, top + bw.y + 8.f), IM_COL32(10, 10, 12, 170), 6.f);
+					dl->AddText(ImGui::GetFont(), s2, ImVec2(cx - ss.x * 0.5f, top + 4.f), IM_COL32(235, 235, 235, 255), sp);
 				}
 			}
+			drawBars(dl);
+			if (settings.sleepCountdown && gameOk && !isH3()) drawSleepCountdown();
 			if (settings.hud)
 			{
 				if (!eng::base()) { dl->AddText(ImVec2(12, 12), IM_COL32(255, 200, 0, 255), "Collision Viewer: game module not loaded"); }

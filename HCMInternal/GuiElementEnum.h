@@ -797,7 +797,7 @@
 			((collisionViewerTimGUI, (Halo2, Halo3, Halo3ODST)))\
 			((collisionViewerTimLabelsGUI, (Halo2, Halo3, Halo3ODST)))\
 			((collisionViewerPillsGUI, (Halo2, Halo3, Halo3ODST)))\
-			((collisionViewerInfoPanelGUI, (Halo2, Halo3, Halo3ODST)))\
+			((collisionViewerInfoPanelGUI, (Halo2, Halo3, Halo3ODST, HaloReach)))\
 			((collisionViewerGhostGUI, (Halo2, Halo3, Halo3ODST)))\
 			((collisionViewerGhostBelievedGUI, (Halo2, Halo3, Halo3ODST)))\
 			((collisionViewerGhostBelievedObjectsGUI, (Halo2)))\
@@ -837,7 +837,25 @@
 			((collisionViewerGhostOffsetsHeadingGUI, (Halo2)))\
 			((collisionViewerGhostLoggingHeadingGUI, (Halo2, Halo3, Halo3ODST)))\
 			((collisionViewerGhostColorsHeadingGUI, (Halo2, Halo3, Halo3ODST)))\
-			((collisionViewerKillVolumesGUI, (Halo2)))\
+			((collisionViewerKillVolumesGUI, (Halo2, Halo3, Halo3ODST, HaloReach)))\
+			((collisionViewerSleepCountdownGUI, (Halo2)))\
+			((collisionViewerSuperbounceGUI, (Halo2)))\
+			((collisionViewerSuperbounceSeamTextGUI, (Halo2)))\
+			((collisionViewerSuperbounceSpeedGUI, (Halo2)))\
+			((collisionViewerSuperbounceDebounceGUI, (Halo2)))\
+			((collisionViewerSuperbounceRecordGUI, (Halo2)))\
+			((collisionViewerSuperbounceHighlightGUI, (Halo2)))\
+			((collisionViewerSuperbounceKeepChargeGUI, (Halo2)))\
+			((collisionViewerSuperbounceForceChargeGUI, (Halo2)))\
+			((collisionViewerSuperbounceSettingsGUI, (Halo2)))\
+			((collisionViewerInfoSuperbounceGUI, (Halo2)))\
+			((oobBarSettingsGUI, (Halo2, Halo3, Halo3ODST, HaloReach)))\
+			((oobBarAnchorCornerGUI, (Halo2, Halo3, Halo3ODST, HaloReach)))\
+			((oobBarScreenOffsetGUI, (Halo2, Halo3, Halo3ODST, HaloReach)))\
+			((oobBarSizeGUI, (Halo2, Halo3, Halo3ODST, HaloReach)))\
+			((detectBarAnchorCornerGUI, (Halo2, Halo3, Halo3ODST, HaloReach)))\
+			((detectBarScreenOffsetGUI, (Halo2, Halo3, Halo3ODST, HaloReach)))\
+			((detectBarSizeGUI, (Halo2, Halo3, Halo3ODST, HaloReach)))\
 			((collisionViewerInfoGeneralGUI, (Halo2)))\
 			((collisionViewerInfoTimGUI, (Halo2)))\
 			((collisionViewerInfoGhostGUI, (Halo2)))\
@@ -847,10 +865,74 @@
 			((collisionViewerInfoTravelGUI, (Halo2)))\
 			((collisionViewerInfoLegendGUI, (Halo2)))\
 			((collisionViewerInfoGridsGUI, (Halo2)))\
-			((collisionViewerInfoKillGUI, (Halo2)))\
+			((collisionViewerInfoKillGUI, (Halo2, Halo3, Halo3ODST, HaloReach)))\
 			((collisionViewerInfoWeldGUI, (Halo2)))
 
 
+
+/* GROUP 5: Launch Trajectory overlay (Halo 2). Its own group rather than growing group 4, for the C1009 reason above. */
+#define RELEASEGUIELEMENTS_ANDSUPPORTEDGAMES5 \
+	((launchTrajectoryToggleGUI, (Halo2, HaloReach)))\
+	((launchTrajectorySettingsGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryMinSpeedGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryDurationGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryOnlyWhenStoredGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryKeepAfterLaunchGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryShowActualPathGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryStopAtCollisionGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryIncludeBarriersGUI, (Halo2)))\
+	((launchTrajectoryIncludeObjectsGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryUseBodyExtentsGUI, (Halo2)))\
+	((launchTrajectoryIgnoreFirstTicksGUI, (Halo2)))\
+	((launchTrajectoryGroundDecelGUI, (Halo2)))\
+	((launchTrajectoryAirFrictionGUI, (Halo2)))\
+	((launchTrajectoryWallBackstepGUI, (Halo2)))\
+	((launchTrajectoryGroundSlideMaxSpeedGUI, (Halo2)))\
+	((launchTrajectoryReleaseModelGUI, (Halo2)))\
+	((launchTrajectoryReleaseFrictionGUI, (Halo2)))\
+	((launchTrajectoryReleaseKickGUI, (Halo2)))\
+	((launchTrajectoryH2DecompGroundGUI, (Halo2)))\
+	((launchTrajectoryReleaseKickRangeGUI, (Halo2)))\
+	((launchTrajectoryReachGameCollisionGUI, (HaloReach)))\
+	((launchTrajectoryBenchRunGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryBenchRunsGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryBenchFirstCrouchGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryBenchCrouchTicksGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryBenchCyclesGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryBenchCycleLengthGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryBenchAttackTicksGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryBenchCrouchDelayGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryBenchStepGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryBenchReleaseDelayGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryBenchCrouchKeyGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryBenchMeleeKeyGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryBenchReleaseKeyGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryBenchSpeedStartGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryBenchSpeedStepGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryHudStoredGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryHudScaleGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryHudHeightGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryReachCrouchReleaseGUI, (HaloReach)))\
+	((launchTrajectoryReachReleaseRatioGUI, (HaloReach)))\
+	((launchTrajectoryFallDeathGUI, (Halo2)))\
+	((launchTrajectoryFallDeathSpeedGUI, (Halo2)))\
+	((launchTrajectoryNextHitToggleGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryNextHitRotateWithViewGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryNextHitColorGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryLogToFileGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryLogSpeedUpsGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryRestitutionGUI, (Halo2)))\
+	((launchTrajectoryMaxSlopeGUI, (Halo2)))\
+	((launchTrajectoryMaxSpeedGUI, (Halo2)))\
+	((launchTrajectoryDampingGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryShowTickMarksGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryShowLabelsGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryLabelScaleGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryLineColorGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryStoredColorGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryHeldColorGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryActualColorGUI, (Halo2, HaloReach)))\
+	((launchTrajectoryImpactColorGUI, (Halo2, HaloReach)))
 
 #define DEBUGGUIELEMENTS_ANDSUPPORTEDGAMES \
 ((HCMDebugHeadingGUI, (ALL_SUPPORTED_GAMES)))\
@@ -879,6 +961,7 @@
 #define ALLGUIELEMENTS2 MAKE_ALL_FIRSTOFPAIR(RELEASEGUIELEMENTS_ANDSUPPORTEDGAMES2)
 #define ALLGUIELEMENTS3 MAKE_ALL_FIRSTOFPAIR(RELEASEGUIELEMENTS_ANDSUPPORTEDGAMES3)
 #define ALLGUIELEMENTS4 MAKE_ALL_FIRSTOFPAIR(RELEASEGUIELEMENTS_ANDSUPPORTEDGAMES4)
+#define ALLGUIELEMENTS5 MAKE_ALL_FIRSTOFPAIR(RELEASEGUIELEMENTS_ANDSUPPORTEDGAMES5)
 #define ALLGUIELEMENTSDEBUG MAKE_ALL_FIRSTOFPAIR(DEBUGGUIELEMENTS_ANDSUPPORTEDGAMES)
 
 enum class GUIElementEnum {
@@ -886,6 +969,7 @@ enum class GUIElementEnum {
 	ALLGUIELEMENTS2
 	ALLGUIELEMENTS3
 	ALLGUIELEMENTS4
+	ALLGUIELEMENTS5
 #ifdef HCM_DEBUG
 	ALLGUIELEMENTSDEBUG
 #endif

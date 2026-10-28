@@ -12,6 +12,10 @@
 #include "H2CV_Renderer.h"
 #include "H2CV_Engine.h"
 #include "H2CV_Halo3.h"
+#include "H2CV_Reach.h"
+#include "H2CV_Superbounce.h"
+
+struct ImDrawList;
 
 namespace h2cv
 {
@@ -59,6 +63,18 @@ namespace h2cv
 		std::atomic_bool ghostPass{ true };
 		std::atomic_bool offsetNaturalReverts{ false };
 		std::atomic_bool killVolumes{ false };
+		std::atomic_bool sleepCountdown{ false };       // Havok sleep countdown window (Halo 2)
+		// superbounce viewer (Halo 2): where you will land and what that launches; sbSeamText off = only the colours and the
+		// launch arrows' speed / height; sbRecord = superbounce_log.csv; sbHighlight = possible monster bounces (WIP);
+		// sbKeepCharge = a crouch charge survives reverts
+		std::atomic_bool superbounce{ false }, sbSeamText{ true }, sbSpeed{ true }, sbDebounce{ true }, sbRecord{ false }, sbHighlight{ false }, sbKeepCharge{ false };
+		std::atomic_bool sbForceCharge{ false };       // Force Charged state: the pair with the level held at -3
+		std::atomic_bool infoSuperbounce{ true };       // its Info panel section
+		std::atomic_bool collision{ true };              // the Collision Viewer itself (off: only the info panel / bars run)
+		// bar geometry: anchor (0 TL, 1 TR, 2 BR, 3 BL), offset from that corner, size
+		std::atomic_int oobAnchor{ 0 }, detectAnchor{ 0 };
+		std::atomic<float> oobX{ 690.f }, oobY{ 324.f }, oobW{ 540.f }, oobH{ 20.f };
+		std::atomic<float> detectX{ 690.f }, detectY{ 380.f }, detectW{ 540.f }, detectH{ 14.f };
 		// info panel sections
 		std::atomic_bool infoGeneral{ true }, infoTim{ true }, infoGhost{ true }, infoGhostObjects{ true }, infoGhostDetails{ true },
 			infoPass{ true }, infoTravel{ true }, infoLegend{ true }, infoGrids{ true }, infoKill{ true }, infoWeld{ true };           // kill volumes (out of bounds): boxes + "checked in N ticks" countdown  // offset save state: natural reverts to that checkpoint restore the offsets too              // flash (green) welded polygons / object pieces the current offset passes through
@@ -123,6 +139,7 @@ namespace h2cv
 		// per-tick callback from the simulation thread (HCM's game tick event) that samples the player's Havok state
 		void onFirstPersonPass3(uintptr_t view, bool opaquePass);
 		void onSimTick(uint32_t tick);
+		void onRenderReach();   // Halo: Reach: bars + panel line only (no Collision Viewer)
 		void onResolveDone();     // engine hook: exit of sub_180951EC0 (bloom + composite done, HUD not yet)
 		void restoreBloom();      // put the game's bloom gate back (unload / mode change)
 		void beforeResize();
@@ -139,11 +156,23 @@ namespace h2cv
 		void drawGhost();
 		void drawWeldZones();
 		void drawKillVolumes();
+		void drawDeath3();      // Halo 3: same death bar (out-of-bounds count + kill volume turns)
+		void drawBars(ImDrawList* dl);
+		void drawSleepCountdown();   // Halo 2: islands' sleep countdown
+		void drawSuperbounce();      // Halo 2: superbounce viewer (H2CV_Superbounce.cpp)
+		bool superbounceActive() const { return !isH3() && (settings.superbounce || settings.sbKeepCharge || settings.sbForceCharge); }
+		sb::Output mSb;              // its last frame: lines, labels, the Info panel section, the HUD's charge state
+		struct SbLabel { float x, y; uint32_t col; std::string text; };
+		std::vector<SbLabel> mSbLabels;   // its labels, projected (drawn at Present)
+		h3::Death mDeath3;
 		struct KillStats { bool valid = false; int count = 0, enabled = 0, attached = 0; uint32_t tick = 0, objIndex = 0; int checking = -1;
 			std::vector<std::pair<int, int>> inside; std::string note; h2::OobTimer oob; int boxDisagree = 0; bool gameTestFailed = false; std::vector<int> insideDisabled; };   // inside: (kill volume, ticks until it is checked)
 		KillStats mKill;
 		float mOobBar = -1.f;   // death bar: remaining fraction of the nearest kill (1 = full, 0 = this tick), < 0 = hidden
-		char mOobBarText[64] = {};   // what that kill is: "OUT OF BOUNDS" / "KILL VOLUME #k", with the ticks left
+		char mOobBarText[64] = {};
+		// detection bar: while the out-of-bounds count is 0 the game only checks on ticks where (tick + player index) % 16
+		// == 0, so going out of bounds is noticed 0..15 ticks later depending on when you went out. -1 = hidden.
+		int mDetectTicks = -1;   // what that kill is: "OUT OF BOUNDS" / "KILL VOLUME #k", with the ticks left
 		void drawHud(const h2::Camera& cam);
 
 		// ---- Halo 3 / ODST (Viewer3.cpp) ----
