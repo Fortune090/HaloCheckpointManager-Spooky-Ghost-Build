@@ -13,6 +13,7 @@ namespace h2cv::sb
 	{
 		bool on = false;           // the viewer
 		bool debounce = true;      // flag landings / seams where a late contact falls through the floor (a debounce)
+		bool spots = true;         // show the remembered monster / dreadnought spots
 		bool seamText = true;      // text in the world (off: colours and the launch arrows' speed / height only)
 		bool record = false;       // superbounce_log.csv in the game folder
 		bool highlight = false;    // possible monster bounces on the whole map (WIP)

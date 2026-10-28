@@ -214,6 +214,7 @@ private:
 		v.sbSeamText = s.collisionViewerSuperbounceSeamText->GetValue();
 		v.sbSpeed = s.collisionViewerSuperbounceSpeed->GetValue();
 		v.sbDebounce = s.collisionViewerSuperbounceDebounce->GetValue();
+		v.sbSpots = s.collisionViewerSuperbounceSpots->GetValue();
 		v.sbRecord = s.collisionViewerSuperbounceRecord->GetValue();
 		v.sbHighlight = s.collisionViewerSuperbounceHighlight->GetValue();
 		v.sbKeepCharge = s.collisionViewerSuperbounceKeepCharge->GetValue();

@@ -1213,6 +1213,14 @@ public:
 			[](bool in) { return true; },
 			nameof(collisionViewerSuperbounceDebounce)
 		);
+
+	// show the remembered monster / dreadnought spots (recorded either way)
+	std::shared_ptr<BinarySetting<bool>> collisionViewerSuperbounceSpots = std::make_shared<BinarySetting<bool>>
+		(
+			true,
+			[](bool in) { return true; },
+			nameof(collisionViewerSuperbounceSpots)
+		);
 	std::shared_ptr<BinarySetting<bool>> collisionViewerSuperbounceRecord = std::make_shared<BinarySetting<bool>>
 		(
 			false,
@@ -4718,6 +4726,7 @@ public:
 		collisionViewerSuperbounceSeamText,
 		collisionViewerSuperbounceSpeed,
 		collisionViewerSuperbounceDebounce,
+		collisionViewerSuperbounceSpots,
 		collisionViewerSuperbounceRecord,
 		collisionViewerSuperbounceHighlight,
 		collisionViewerSuperbounceKeepCharge,

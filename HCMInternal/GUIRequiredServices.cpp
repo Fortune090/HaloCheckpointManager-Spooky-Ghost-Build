@@ -748,6 +748,9 @@ const std::map <GUIElementEnum, std::vector<OptionalCheatEnum>> GUIRequiredServi
 	{ GUIElementEnum::collisionViewerSuperbounceDebounceGUI,
 		{OptionalCheatEnum::CollisionViewer}
 	},
+	{ GUIElementEnum::collisionViewerSuperbounceSpotsGUI,
+		{OptionalCheatEnum::CollisionViewer}
+	},
 
 	{ GUIElementEnum::collisionViewerSuperbounceRecordGUI,
 		{OptionalCheatEnum::CollisionViewer}

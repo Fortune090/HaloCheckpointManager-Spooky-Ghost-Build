@@ -843,6 +843,7 @@
 			((collisionViewerSuperbounceSeamTextGUI, (Halo2)))\
 			((collisionViewerSuperbounceSpeedGUI, (Halo2)))\
 			((collisionViewerSuperbounceDebounceGUI, (Halo2)))\
+			((collisionViewerSuperbounceSpotsGUI, (Halo2)))\
 			((collisionViewerSuperbounceRecordGUI, (Halo2)))\
 			((collisionViewerSuperbounceHighlightGUI, (Halo2)))\
 			((collisionViewerSuperbounceKeepChargeGUI, (Halo2)))\

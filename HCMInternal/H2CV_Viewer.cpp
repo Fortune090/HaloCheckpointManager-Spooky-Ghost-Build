@@ -1903,6 +1903,7 @@ namespace h2cv
 		o.forceCharge = settings.sbForceCharge;
 		o.seamText = settings.sbSeamText;
 		o.debounce = settings.sbDebounce;
+		o.spots = settings.sbSpots;
 		o.record = settings.sbRecord;
 		o.highlight = settings.sbHighlight;
 		o.keepCharge = settings.sbKeepCharge;

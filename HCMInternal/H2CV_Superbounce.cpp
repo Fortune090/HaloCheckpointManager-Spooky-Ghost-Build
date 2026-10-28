@@ -42,7 +42,7 @@ namespace h2cv::sb
 
 		// this frame's output and settings (frame() points / fills them)
 		Output* g_out = nullptr;
-		struct s_settings_sb { bool superbounce = true, superbounce_record = false, superbounce_gaps = false, superbounce_seam_text = true, superbounce_debounce = true; } g_settings;
+		struct s_settings_sb { bool superbounce = true, superbounce_record = false, superbounce_gaps = false, superbounce_seam_text = true, superbounce_debounce = true, superbounce_spots = true; } g_settings;
 		void line(v3 a, v3 b, ImU32 c, float thick = 1.5f)
 		{
 			if (!g_out) return;
@@ -179,10 +179,31 @@ namespace h2cv::sb
 		// tick, 75 at 60, depths alike), so the launch estimates - and the limits that name launches (monster, dreadnought) and
 		// the fall brake (a per-tick catch: untested at 60) - scale with it. Set every frame from the game's tick rate.
 		float g_sb_tick_scale = 1.f;
-		// a debounce: a late contact whose tick starts this far below the floor (feet) has the pill's lower sphere at or under
-		// the floor - the pushes come out flat or downward and it falls through instead of launching (recorded: 0.198 below fell
-		// through, pushes' z 0.00; late contacts starting 0.09 below still launched, pushes' z 0.05)
+		// a debounce: a late contact whose tick starts this far below the floor (feet) has the pill's lower sphere centre at the
+		// seam's edge. Havok's capsule-triangle contact (Xbox decomp, 0x2f4f00) then takes the edge contact's normal as the cross
+		// of the pill's axis and the edge - level, for an upright pill and a level edge - so nothing pushes up and it falls
+		// through (recorded: 0.198, 0.207, 0.210 below fell through, pushes' z 0.00; 0.09 below still launched, z 0.05)
 		constexpr float k_sb_debounce = 0.19f;
+		// monster odds by how fast you arrive, at places that have given monster launches (320 landings at 30 tick): walking off
+		// (3.5 u/s or less) 7%, 3.5-10 about 1 in 8, 10-20 hardly tried (0 of 9), 20-40 27%; faster is braked. Launch sizes were
+		// alike in both windows (22-45) - the speed changes the odds, not the size. Scaled with the tick rate (untested at 60).
+		const char* sb_monster_window(float arrive, char* buf, size_t n)
+		{
+			const float s = g_sb_tick_scale, a = arrive / s;
+			if (k_sb_brake_speed > 0.f && arrive >= k_sb_brake_speed * s) snprintf(buf, n, "  arriving %.0f u/s: braked before impact - no monster", arrive);
+			else if (a <= 3.5f) snprintf(buf, n, "  arriving %.1f u/s (walking off): about 1 in 14 for a monster - best odds arriving %.0f-%.0f u/s (1 in 4)", arrive, 20.f * s, 40.f * s);
+			else if (a < 10.f) snprintf(buf, n, "  arriving %.1f u/s: about 1 in 8 for a monster - best odds arriving %.0f-%.0f u/s (1 in 4)", arrive, 20.f * s, 40.f * s);
+			else if (a < 20.f) snprintf(buf, n, "  arriving %.1f u/s: hardly tried at this speed - best odds arriving %.0f-%.0f u/s (1 in 4)", arrive, 20.f * s, 40.f * s);
+			else if (a < 40.f) snprintf(buf, n, "  arriving %.1f u/s: the best monster window (about 1 in 4)", arrive);
+			else snprintf(buf, n, "  arriving %.0f u/s: untested this fast", arrive);
+			return buf;
+		}
+		// the same, as a short suffix for the highlight / spot labels
+		const char* sb_monster_odds(char* buf, size_t n)
+		{
+			snprintf(buf, n, " - best odds arriving %.0f-%.0f u/s (1 in 4); walking off 1 in 14", 20.f * g_sb_tick_scale, 40.f * g_sb_tick_scale);
+			return buf;
+		}
 		// how deep a landing goes: h = feet height above the floor on the tick before contact, step = the contact tick's
 		// fall (fit to 63 recorded landings above the sweep speed, rms 0.031)
 		float sb_depth(float step, float h) { return 0.86f * step - 0.85f * h + 0.01f; }
@@ -223,6 +244,10 @@ namespace h2cv::sb
 		constexpr float k_sb_zone = 0.06f;                // squeeze zone: land within this of the seam line (a launch at 0.054)
 		constexpr float k_sb_zone_edge = 0.01f;           // just past it: an edge (MCC: a launch at 0.064)
 		constexpr float k_sb_tilt_full = 2.15f;           // degrees across where the launch reaches full strength (0.96: none, 0.88: 5 u/s)
+		// drift across a seam, from 1033 recorded landings (MCC, 30 tick): green verdicts launched 89-93% at 2.15-8 deg, ~70% at
+		// 8-13 (40 landings), 0 of 4 above 13 - drifting that fast slides the pill off before the squeeze. Under 1 deg the pushes
+		// nearly cancel (amber); 1-2.15 launches as often as green (77%), only weaker - the arrow shows that
+		constexpr float k_sb_tilt_weak = 1.0f, k_sb_tilt_fast = 8.f, k_sb_tilt_slide = 13.f;
 		constexpr float k_sb_air_reach = 2.25f;           // in the air: how fast air control can still move your landing (u/s)
 		constexpr float k_sb_air_search_max = 40.f;       // ... and the widest the seams-below search gets around it (wu)
 		constexpr float k_sb_dreadnought = 35.f;          // a dreadnought: a launch of 35 u/s or more (the community's line)
@@ -242,22 +267,23 @@ namespace h2cv::sb
 		struct s_sb_surface { std::vector<v3> poly; std::vector<uint32> edges; v3 n{}; v3 lo{}, hi{}; bool ok = false; const collision_bsp* src = nullptr; uint32 base = 0; };
 		// bend: + valley, - ridge (deg); gap: a monster gap's mouth (s0 / s1 its two faces), width = its narrowest
 		// slot: steep faces hang from it on both sides (a slot / fin thinner than the pill right under the seam)
-		struct s_sb_seam { v3 a{}, b{}; uint32 s0 = 0, s1 = 0; float bend = 0.f; bool gap = false; float width = 0.f; bool slot = false; };
+		struct s_sb_seam { v3 a{}, b{}; uint32 s0 = 0, s1 = 0; float bend = 0.f; bool gap = false; float width = 0.f; bool slot = false; bool junction = false; };   // junction: a piece meeting a floor (bend: the faces' angle)
 		struct s_sb_gap { v3 a{}, b{}, m{}; float wmin = 0.f, wmax = 0.f; uint32 face_a = 0, face_b = 0; float room = 3.f; };   // mouth a-b, m = across
 		// a dreadnought fin: ridge a-b, m across, thickness range, sides' angle from parallel, launch direction and size
 		// room: clear height above its ridge (caps how fast you can arrive, so how likely you sink in)
-		struct s_sb_fin { v3 a{}, b{}, m{}, dir{}; float tmin = 0.f, tmax = 0.f, dev = 0.f, est = 0.f, room = 0.f; uint32 face_a = 0, face_b = 0; };
+		struct s_sb_fin { v3 a{}, b{}, m{}, dir{}; float tmin = 0.f, tmax = 0.f, dev = 0.f, est = 0.f, room = 0.f; uint32 face_a = 0, face_b = 0; bool parallel = false; };   // parallel: a thin plate
 		struct s_sb_bsp
 		{
 			const collision_bsp* bsp = nullptr; int32 surface_count = 0, edge_count = 0, instance_count = 0;
 			std::vector<s_sb_surface> surf; std::vector<s_sb_seam> seams; std::vector<s_sb_gap> gaps; std::vector<s_sb_fin> fins;
 			std::vector<uint32> inst_base;                // each instance's surface 0 in surf (0xFFFFFFFF: not cached)
 					size_t obj_surf = 0, obj_seam = 0;      // where the objects' surfaces / seams start (the level's come first)
+					std::vector<uint32> junctions;          // seam indices of the junctions (a piece meeting a floor at an angle)
 		};
 		s_sb_bsp g_sbb;
 
 		// seams on screen: worked out once per tick, each (and each of its pieces) kept 1.5 s after it last qualified
-		struct s_sb_rated { float best_launch = 0.f, best_hi = 0.f; int q = 0; v3 a{}, b{}, near_pt{}; float drop = 0.f, walk = 0.f, jump = 0.f, down = 0.f, need = 0.f, depth_walk = 0.f, depth_jump = 0.f, late_walk = 0.f, late_jump = 0.f; int pieces = 1, opt = 0; bool air = false, walk_ok = false, jump_ok = false, flat = false, carried = false, gap = false, slot = false; float width = 0.f; bool braked = false; float late_start = 1.f; bool debounce = false; };
+		struct s_sb_rated { float best_launch = 0.f, best_hi = 0.f; int q = 0; v3 a{}, b{}, near_pt{}; float drop = 0.f, walk = 0.f, jump = 0.f, down = 0.f, need = 0.f, depth_walk = 0.f, depth_jump = 0.f, late_walk = 0.f, late_jump = 0.f; int pieces = 1, opt = 0; bool air = false, walk_ok = false, jump_ok = false, flat = false, carried = false, gap = false, slot = false; float width = 0.f; bool braked = false; float late_start = 1.f; bool debounce = false; int ghost_tries = 0, ghost_hits = 0; bool junction = false; float jdeg = 0.f; };
 		struct s_sb_shown { uint32 seen = 0; uint32 piece_seen[24] = {}; uint32 air_id = 0; s_sb_rated r; };   // ticks + 1 (0 = never)
 		std::map<uint32, s_sb_shown> g_sb_shown;
 		uint32 g_sb_plan_tick = 0xFFFFFFFF;
@@ -304,6 +330,7 @@ namespace h2cv::sb
 				"# H,tick,pair,helper key (triangle),contacts,cached normal_x,y,z,TIM,pair penetration level,face normal_x,y,z (the triangle's own; 0 0 0 unknown)\n"
 				"# F,fin,ridge a_x,y,z,ridge b_x,y,z,thickness min,max,sides deg,estimate u/s,launch dir_x,y,z,room above (once per session / map)\n"
 				"# T lines end with: nearest fin index,its horizontal distance (-1,-1: none within 3 wu)\n"
+				"# J,seam index,a x,y,z,b x,y,z,the faces' angle deg - a junction: a piece meeting a floor at an angle (once per session / map)\n"
 				"# V,tick,what the viewer showed for this fall (as of the frame before): kind (0 none, 1 seam, 2 gap, 3 fin),"
 				"colour (-1 none, 0 red, 1 yellow, 2 green, 3 edge),contact speed,depth on time,late,seam offset,tilt deg,landing x,y,z,"
 				"launch estimate lo,hi (u/s at this tick rate; 0 = none),late contact start (feet above the floor, negative = below; 1 = none),"
@@ -392,7 +419,7 @@ namespace h2cv::sb
 		float sb_headroom(v3 p, float maxh);
 		// what the viewer last showed for the fall in progress (written to the log as V lines)
 		struct s_sb_pred { int kind = 0, q = -1; float speed = 0.f, depth = 0.f, depth_late = 0.f, off = 0.f, tilt = 0.f; v3 at{};
-			float launch_lo = 0.f, launch_hi = 0.f, late_start = 1.f; int debounce = 0, feature = -1; };   // + the launch estimate, a late contact's start, debounce, which seam / gap / fin
+			float launch_lo = 0.f, launch_hi = 0.f, late_start = 1.f; int debounce = 0, feature = -1; bool lottery = false; };   // + the launch estimate, a late contact's start, debounce, which seam / gap / fin
 		s_sb_pred g_sb_pred;
 		float sb_up_estimate(float tilt);
 		void sb_dir_arrow(v3 base, v3 dir, float speed, ImU32 c);
@@ -693,8 +720,11 @@ namespace h2cv::sb
 			const float dev = std::acos((std::max)(-1.f, (std::min)(1.f, -c))) * 57.29578f;
 			if (why) why->dev = dev;
 			if (c > -0.966f) return k_fin_not_opposite;                                    // not within 15 deg of opposite
-			if (dev < 1.0f || dev > 10.f) return k_fin_sides_angle;                        // parallel sides cancel; wide wedges push little
-			                                                                               // (MCC: a 33.8 u/s sideways launch from sides 1.15 deg apart)
+			if (dev > 10.f) return k_fin_sides_angle;                                      // wide wedges push little
+			// sides (almost) parallel: a thin plate. Its own faces cancel, but the pushes tilt where the pill sinks onto its top
+			// edges, as on a seam (Headlong's bridge plate: 0.20 thick, sides 0.00 deg apart, launches with pushes 2.7 deg from
+			// opposite) - kept up to 0.45 thick, as a lottery with no estimate; thicker, it is a wall
+			const bool parallel = dev < 1.0f;
 			hits.clear();
 			sb_gap_overlap(fa, fb, samples);
 			// the overlap region already lies under B along A's normal, so every sample has B across from it;
@@ -728,12 +758,71 @@ namespace h2cv::sb
 			base = base * (1.f / (float)nb);
 			const float ub = dot(base, t);
 			if (thi - tlo < 0.1f) { tlo -= 0.05f; thi += 0.05f; }
+			if (parallel && w1 > 0.45f) { if (why) { why->tmin = w0; why->tmax = w1; } return k_fin_sides_angle; }   // a wall, not a plate
 			fn = s_sb_fin{};
 			fn.a = base + t * (tlo - ub); fn.b = base + t * (thi - ub); fn.m = m; fn.tmin = w0; fn.tmax = w1; fn.dev = dev;
-			fn.dir = norm(fa.n + fb.n); fn.face_a = ia; fn.face_b = ib;
+			fn.dir = parallel ? v3{ 0.f, 0.f, 1.f } : norm(fa.n + fb.n); fn.face_a = ia; fn.face_b = ib; fn.parallel = parallel;
 			if (why) { why->tmin = w0; why->tmax = w1; why->dirz = fn.dir.z; why->ridge = ztop; }
 			if (fn.dir.z < -0.3f) return k_fin_pushes_down;                                 // pushes down: the underside of something, nothing to land on
 			return k_fin_ok;
+		}
+
+		// ---- junctions: where a separate piece meets a floor at an angle - a block or ramp standing on the level floor, its
+		// leaning face crossing or resting on the floor without sharing an edge, so no seam exists there. Headlong's three
+		// biggest recorded launches (28.3, 27.4 and 25.7 u/s) were the pill wedged in such creases. The crease joins the seams
+		// flagged as a junction, rated a lottery: big launches happen there, rarely (vertical sides are left out - a floor and
+		// wall corner pushes weakly)
+		void sb_find_junctions()
+		{
+			g_sbb.junctions.clear();
+			std::vector<uint32> floors;
+			for (uint32 s = 0; s < (uint32)g_sbb.surf.size(); ++s)
+				if (g_sbb.surf[s].ok && g_sbb.surf[s].n.z >= 0.7f && g_sbb.surf[s].poly.size() >= 3) floors.push_back(s);
+			std::sort(floors.begin(), floors.end(), [](uint32 x, uint32 y) { return g_sbb.surf[x].lo.x < g_sbb.surf[y].lo.x; });
+			for (uint32 a = 0; a < (uint32)g_sbb.surf.size(); ++a)
+			{
+				const s_sb_surface& A = g_sbb.surf[a];
+				if (!A.ok || A.poly.size() < 3 || A.n.z < 0.17f || A.n.z > 0.97f) continue;    // leaning 15-80 deg from level
+				for (uint32 b : floors)
+				{
+					const s_sb_surface& B = g_sbb.surf[b];
+					if (B.lo.x > A.hi.x + 0.05f) break;
+					if (B.base == A.base || B.hi.x < A.lo.x - 0.05f || B.lo.y > A.hi.y + 0.05f || B.hi.y < A.lo.y - 0.05f || B.lo.z > A.hi.z + 0.05f || B.hi.z < A.lo.z - 0.05f) continue;
+					// A's polygon against B's plane: the corners on it and the edges crossing it
+					v3 pts[12]; int np = 0;
+					for (size_t k = 0; k < A.poly.size() && np < 12; ++k)
+					{
+						const v3 p = A.poly[k], q = A.poly[(k + 1) % A.poly.size()];
+						const float dp = dot(p - B.poly[0], B.n), dq = dot(q - B.poly[0], B.n);
+						if (std::fabs(dp) < 0.01f) pts[np++] = p;
+						else if (std::fabs(dq) >= 0.01f && (dp < 0.f) != (dq < 0.f)) pts[np++] = p + (q - p) * (dp / (dp - dq));
+					}
+					if (np < 2) continue;
+					v3 ca = pts[0], cb = pts[1]; float span = len(cb - ca);
+					for (int x = 0; x < np; ++x) for (int y = x + 1; y < np; ++y) if (len(pts[y] - pts[x]) > span) { span = len(pts[y] - pts[x]); ca = pts[x]; cb = pts[y]; }
+					if (span < 0.3f) continue;
+					// clipped to B's polygon: the longest run of samples inside it
+					const int ns = (std::min)(64, (std::max)(4, (int)(span / 0.1f)));
+					int run_s = -1, run_e = -1, cur_s = -1;
+					for (int k = 0; k <= ns; ++k)
+					{
+						if (sb_inside(B.poly, B.n, ca + (cb - ca) * ((float)k / (float)ns)))
+						{
+							if (cur_s < 0) cur_s = k;
+							if (run_s < 0 || k - cur_s > run_e - run_s) { run_s = cur_s; run_e = k; }
+						}
+						else cur_s = -1;
+					}
+					if (run_s < 0 || (float)(run_e - run_s) * span / (float)ns < 0.3f) continue;
+					s_sb_seam sm;
+					sm.a = ca + (cb - ca) * ((float)run_s / (float)ns); sm.b = ca + (cb - ca) * ((float)run_e / (float)ns);
+					if (sb_headroom((sm.a + sm.b) * 0.5f + v3{ 0.f, 0.f, 0.05f }, 3.f) < k_sb_room_min) continue;   // nothing to land into
+					sm.s0 = b; sm.s1 = a; sm.junction = true;
+					sm.bend = std::acos((std::max)(-1.f, (std::min)(1.f, dot(A.n, B.n)))) * 57.29578f;
+					g_sbb.junctions.push_back((uint32)g_sbb.seams.size());
+					g_sbb.seams.push_back(sm);
+				}
+			}
 		}
 
 		void sb_find_fins()
@@ -773,6 +862,7 @@ namespace h2cv::sb
 						f2.a = a0 + t2 * lo2; f2.b = a0 + t2 * hi2;
 						f2.tmin = (std::min)(f2.tmin, fn.tmin); f2.tmax = (std::max)(f2.tmax, fn.tmax);
 						if (fn.dev > f2.dev) { f2.dev = fn.dev; f2.dir = fn.dir; }
+						f2.parallel = f2.parallel && fn.parallel;
 						merged = true;
 						break;
 					}
@@ -927,12 +1017,77 @@ namespace h2cv::sb
 			fclose(f);
 		}
 
+		// ---- ghost seams: level seams whose pure-lottery landings (deep only with a late contact) have launched - their contact
+		// comes late more often than not (Headlong's slot seam: 15 of 18 with the stick let go; other yellows launched about 1 in
+		// 30). Counted per level seam and kept in superbounce_seams.csv with the map key; 2+ launches at 30%+ make it amber.
+		struct s_sb_ghost { int idx = -1; v3 a{}, b{}; int tries = 0, hits = 0; };
+		std::vector<s_sb_ghost> g_sb_ghosts;
+		std::vector<std::string> g_sb_ghost_other;
+		bool sb_ghost_get(int idx, int& tries, int& hits)
+		{
+			for (const auto& gh : g_sb_ghosts)
+				if (gh.idx == idx) { tries = gh.tries; hits = gh.hits; return gh.hits >= 2 && gh.hits * 10 >= gh.tries * 3; }
+			return false;
+		}
+		void sb_ghosts_save()
+		{
+			FILE* f = nullptr;
+			if (fopen_s(&f, "superbounce_seams.csv", "w") != 0 || !f) return;
+			fprintf(f, "# superbounce ghost seams: map key,seam index,end a x,y,z,end b x,y,z,lottery landings,launched\n");
+			for (const auto& l : g_sb_ghost_other) fprintf(f, "%s\n", l.c_str());
+			for (const auto& gh : g_sb_ghosts)
+				fprintf(f, "%016llx,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d\n", (unsigned long long)g_sb_map_key, gh.idx, gh.a.x, gh.a.y, gh.a.z, gh.b.x, gh.b.y, gh.b.z, gh.tries, gh.hits);
+			fclose(f);
+		}
+		void sb_ghosts_load()
+		{
+			g_sb_ghosts.clear(); g_sb_ghost_other.clear();
+			FILE* f = nullptr;
+			if (fopen_s(&f, "superbounce_seams.csv", "r") != 0 || !f) return;
+			char line[320];
+			while (fgets(line, sizeof(line), f))
+			{
+				size_t n = strlen(line);
+				while (n && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = 0;
+				if (n == 0 || line[0] == '#') continue;
+				char* p = line; char* e = nullptr;
+				const unsigned long long key = strtoull(p, &e, 16);
+				if (e == p || *e != ',') continue;
+				if (key != g_sb_map_key) { g_sb_ghost_other.push_back(line); continue; }
+				p = e + 1;
+				const long idx = strtol(p, &e, 10);
+				if (e == p || *e != ',') continue;
+				p = e + 1;
+				float v[8]; bool ok = true;
+				for (int i = 0; i < 8 && ok; ++i) { v[i] = strtof(p, &e); if (e == p) ok = false; else p = (*e == ',') ? e + 1 : e; }
+				if (!ok || idx < 0 || idx >= (long)g_sbb.seams.size()) continue;
+				s_sb_ghost gh; gh.idx = (int)idx; gh.a = v3{ v[0], v[1], v[2] }; gh.b = v3{ v[3], v[4], v[5] }; gh.tries = (int)v[6]; gh.hits = (int)v[7];
+				const s_sb_seam& sm = g_sbb.seams[(size_t)idx];
+				if (len(sm.a - gh.a) > 0.02f || len(sm.b - gh.b) > 0.02f) continue;        // not the same seam any more
+				g_sb_ghosts.push_back(gh);
+			}
+			fclose(f);
+		}
+		// a pure-lottery landing on level seam idx: did it launch?
+		void sb_ghost_impact(int idx, bool launched)
+		{
+			if (idx < 0 || idx >= (int)g_sbb.obj_seam || idx >= (int)g_sbb.seams.size()) return;   // level seams only (object seams move)
+			s_sb_ghost* gh = nullptr;
+			for (auto& x : g_sb_ghosts) if (x.idx == idx) gh = &x;
+			if (!gh) { g_sb_ghosts.push_back(s_sb_ghost{}); gh = &g_sb_ghosts.back(); gh->idx = idx; gh->a = g_sbb.seams[(size_t)idx].a; gh->b = g_sbb.seams[(size_t)idx].b; }
+			++gh->tries;
+			if (launched) ++gh->hits;
+			sb_ghosts_save();
+		}
+		s_sb_pred g_sb_last_air;                        // the verdict on the last falling tick (what a landing was rated)
+
 		// a new map (or bsp): its key, its record, and its spots from the file
 		void sb_spots_on_map()
 		{
 			g_sb_map_key = sb_map_key();
 			const uint64_t legacy_key = sb_map_key_v(true);
 			sb_records_load();
+			sb_ghosts_load();
 			g_sb_spots.clear(); g_sb_spot_other.clear();
 			FILE* f = nullptr;
 			if (fopen_s(&f, "superbounce_spots.csv", "r") != 0 || !f) return;
@@ -1067,6 +1222,7 @@ namespace h2cv::sb
 			}
 			sb_find_gaps();
 			sb_find_fins();
+			sb_find_junctions();
 			sb_mark_slots();
 			g_sb_fins_logged = false;
 			sb_spots_on_map();                    // this map's remembered monster / dreadnought spots
@@ -1234,7 +1390,16 @@ namespace h2cv::sb
 		{
 			const s_sb_surface& sf = g_sbb.surf[s];
 			dist = 1e9f;
-			if (!sf.src) return false;
+			// seams that are not edges of this surface's own piece: junctions (a piece meeting this floor) and the object
+			// layer's (crates, scenery - built from triangles, with no BSP edges to walk)
+			auto consider = [&](const s_sb_seam& sm) {
+				if (sm.s0 != s && sm.s1 != s) return;
+				const float d = len(at - sb_closest_on_segment(at, sm.a, sm.b));
+				if (d < dist) { dist = d; a = sm.a; b = sm.b; bend = sm.bend; }
+			};
+			for (uint32 ji : g_sbb.junctions) consider(g_sbb.seams[(size_t)ji]);
+			for (size_t i = g_sbb.obj_seam; i < g_sbb.seams.size(); ++i) consider(g_sbb.seams[i]);
+			if (!sf.src) return dist < 1e8f;
 			const size_t k = sf.poly.size();
 			const uint32 local = s - sf.base;
 			for (size_t i = 0; i < k; ++i)
@@ -1403,6 +1568,11 @@ namespace h2cv::sb
 					const s_sb_fin& f = g_sbb.fins[i];
 					fprintf(g_sb_log, "F,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.3f,%.3f,%.2f,%.1f,%.3f,%.3f,%.3f,%.2f\n", (int)i, f.a.x, f.a.y, f.a.z, f.b.x, f.b.y, f.b.z,
 						f.tmin, f.tmax, f.dev, f.est, f.dir.x, f.dir.y, f.dir.z, f.room);
+				}
+				for (uint32 ji : g_sbb.junctions)
+				{
+					const s_sb_seam& sm = g_sbb.seams[(size_t)ji];
+					fprintf(g_sb_log, "J,%u,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.1f\n", (unsigned)ji, sm.a.x, sm.a.y, sm.a.z, sm.b.x, sm.b.y, sm.b.z, sm.bend);
 				}
 				g_sb_fins_logged = true;
 			}
@@ -1695,7 +1865,7 @@ namespace h2cv::sb
 			const char* shape = slot ? "SLOT" : (bend >= k_sb_valley_min ? "valley" : (bend <= -k_sb_valley_min ? "ridge" : "flat"));
 			std::string why;
 			bool hard_fail = false, fixable = false;      // hard: nothing to steer; fixable: off the seam / the angle
-			bool off_edge = false, weak_tilt = false;     // edges: just past the squeeze zone / drift across still ramping up
+			bool off_edge = false, weak_tilt = false, fast_drift = false;   // edges: past the squeeze zone / barely drifting / drifting fast
 			if (!charged) { why += "  NOT CHARGED"; hard_fail = true; }
 			if (ld.braked) { why += "  BRAKED: a fall this fast is caught a tick before impact and set down at 4 u/s"; hard_fail = true; }
 			if (!seam) { why += "  no seam here"; hard_fail = true; }
@@ -1718,6 +1888,19 @@ namespace h2cv::sb
 				}
 				else snprintf(t1, sizeof(t1), "  DEBOUNCE if the contact is late (it would start %.2f below the floor)", ld.step - ld.h_last);
 				why += t1;
+			}
+			// landing on a remembered monster / dreadnought spot: the speed you arrive at, against the monster windows
+			if (g_settings.superbounce_spots)
+			{
+				const int cur_tps = (int)std::lround(30.f * g_sb_tick_scale);
+				for (const auto& sp : g_sb_spots)
+				{
+					if (sp.tps != cur_tps || std::fabs(sp.at.z - ld.at.z) > 1.f || (sp.at.x - ld.at.x) * (sp.at.x - ld.at.x) + (sp.at.y - ld.at.y) * (sp.at.y - ld.at.y) > 0.4f * 0.4f) continue;
+					char wb[160];
+					why += sp.best >= k_sb_dreadnought * (float)sp.tps / 30.f ? "  on a DREADNOUGHT SPOT:" : "  on a MONSTER SPOT:";
+					why += sb_monster_window(speed, wb, sizeof(wb)) + 1;
+					break;
+				}
 			}
 			// the launch: the up tilt from your drift across the seam (only above the sweep speed) and the seam's bend
 			// (sideways) add as vectors - the pair's two pushes are that many degrees from opposite, along that direction
@@ -1749,24 +1932,53 @@ namespace h2cv::sb
 				else if (off > k_sb_zone) off_edge = true;
 				const float deg = total * 57.29578f;
 				if (deg < k_sb_tilt_min) { why += "  ANGLE: too little drift across (the pushes cancel)"; fixable = true; }
-				else if (deg > k_sb_tilt_max) { why += "  ANGLE: too much drift across"; fixable = true; }
-				else if (deg < k_sb_tilt_full) weak_tilt = true;
+				else if (deg >= k_sb_tilt_slide)
+				{
+					char t3[140];
+					snprintf(t3, sizeof(t3), "  ANGLE: drifting %.0f deg across - too fast, the pill slides off the seam (13+: 0 of 4 recorded)", deg);
+					why += t3; fixable = true;
+				}
+				else if (deg >= k_sb_tilt_fast) fast_drift = true;
+				else if (deg < k_sb_tilt_weak) weak_tilt = true;
 			}
 			const bool depth_edge = on_ok && ld.have_depth && ld.depth < k_sb_depth_sure;
-			const bool edge = on_ok && (speed_edge || depth_edge || weak_tilt || off_edge);
-			const int q = hard_fail ? 0 : ((fixable || !on_ok) ? 1 : (edge ? 3 : 2));
-			if (!hard_fail && on_ok && fixable) why += "  (deep enough: LIKELY once that is fixed)";
+			const bool edge = on_ok && (speed_edge || depth_edge || weak_tilt || off_edge || fast_drift);
+			int q = hard_fail ? 0 : ((fixable || !on_ok) ? 1 : (edge ? 3 : 2));
+			// a ghost seam: its pure-lottery landings (it needs a late contact) have launched - amber, with what it did
+			const bool pure_lottery = q == 1 && !fixable && !hard_fail;
+			const int seam_idx = seam ? sb_seam_index(sa, sb) : -1;
+			int ghost_t = 0, ghost_h = 0;
+			if (pure_lottery && sb_ghost_get(seam_idx, ghost_t, ghost_h)) q = 3;
+			else ghost_t = 0;
+			// a junction (a piece meeting the floor at an angle): a lottery whatever the depth says, with the monster odds
+			const bool junction = seam && seam_idx >= 0 && g_sbb.seams[(size_t)seam_idx].junction;
+			if (junction)
+			{
+				if (!hard_fail) q = 1;
+				char tj[160], wb[160];
+				snprintf(tj, sizeof(tj), "  JUNCTION (%.0f deg: a piece meeting the floor) - LOTTERY: big launches happen here, rarely", g_sbb.seams[(size_t)seam_idx].bend);
+				why += tj; why += sb_monster_window(speed, wb, sizeof(wb));
+			}
+			if (junction) {}
+			else if (!hard_fail && on_ok && fixable) why += "  (deep enough: LIKELY once that is fixed)";
 			else if (!hard_fail && on_ok && edge)
 			{
 				char te[140];
 				if (speed_edge) snprintf(te, sizeof(te), "  EDGE (2 in 3: arriving %.2f u/s, within %.2f of the %.2f sweep)", len(v_on), k_sb_speed_edge, vsweep);
-				else if (depth_edge) snprintf(te, sizeof(te), "  EDGE (2 in 3: depth %.2f, near the %.2f limit - a slightly different drop height or speed decides it)", ld.depth, k_sb_depth_min);
-				else if (weak_tilt) snprintf(te, sizeof(te), "  EDGE (weak: %.1f deg of drift across - a full launch needs %.1f+)", total * 57.29578f, k_sb_tilt_full);
+				else if (depth_edge) snprintf(te, sizeof(te), "  EDGE (about 1 in 2: depth %.2f, near the %.2f limit - a slightly different drop height or speed decides it)", ld.depth, k_sb_depth_min);
+				else if (fast_drift) snprintf(te, sizeof(te), "  EDGE (7 in 10: drifting %.1f deg across - above 8 the pill can slide off before the squeeze)", total * 57.29578f);
+				else if (weak_tilt) snprintf(te, sizeof(te), "  EDGE (barely drifting across, %.1f deg - the pushes nearly cancel; 1+ is safer)", total * 57.29578f);
 				else snprintf(te, sizeof(te), "  EDGE (%.3f off the seam - the squeeze zone ends about here)", off);
 				why += te;
 			}
 			else if (!hard_fail && on_ok) why += "  LIKELY (9 in 10: deep even with the contact on time)";
-			else if (!hard_fail) why += "  LOTTERY (1 in 100: deep only if Havok's contact comes a tick late)";
+			else if (!hard_fail && ghost_t > 0)
+			{
+				char tg[140];
+				snprintf(tg, sizeof(tg), "  GHOST SEAM: %d of %d lottery landings here launched (its contact comes late)", ghost_h, ghost_t);
+				why += tg;
+			}
+			else if (!hard_fail) why += "  LOTTERY (about 1 in 30: deep only if Havok's contact comes a tick late)";
 			if (seam)
 			{
 				line(sa, sb, sb_quality_color(q), 4.f);
@@ -1780,6 +1992,7 @@ namespace h2cv::sb
 			// everything you control is right: green arrow when it is deep on time, yellow when it needs a late contact;
 			// mostly up shows how high, otherwise the direction it throws you
 			g_sb_pred.kind = 1; g_sb_pred.q = q; g_sb_pred.speed = speed; g_sb_pred.depth = ld.depth; g_sb_pred.depth_late = ld.depth_late;
+			g_sb_pred.lottery = pure_lottery;
 			g_sb_pred.off = seam ? off : -1.f; g_sb_pred.tilt = total * 57.29578f; g_sb_pred.at = ld.at;
 			g_sb_pred.launch_lo = g_sb_pred.launch_hi = seam ? sb_up_estimate(total) * g_sb_tick_scale : 0.f;
 			g_sb_pred.late_start = ld.have_depth ? ld.h_last - ld.step : 1.f;
@@ -1874,6 +2087,7 @@ namespace h2cv::sb
 			}
 			if (!hard_fail && !fixable) sb_arrow(at, v3{ 0.f, 0.f, 1.f }, est_lo, sb_quality_color(q), 3.f, true);
 			char tx[260];
+			{ char wb[160]; why += sb_monster_window(speed, wb, sizeof(wb)); }
 			snprintf(tx, sizeof(tx), "MONSTER GAP %.2f wide, land %.2f off its middle, %.2f u/s, tilt %.1f deg%s", gp.wmin, off, speed, deg, why.c_str());
 			if (g_settings.superbounce_seam_text) text(at + v3{ 0.f, 0.f, 0.25f }, sb_quality_color(q), tx);
 			if (g_settings.superbounce_seam_text && speed >= vsweep && down > 0.1f)
@@ -1988,6 +2202,8 @@ namespace h2cv::sb
 					snprintf(t, sizeof(t), "%s SPOT%s: %d of %d charged landings here launched (best %.0f u/s %s)", dread ? "DREADNOUGHT" : "MONSTER", tr,
 						s.hits, s.tries, s.best, sb_dir_name(s.dir));
 					text(s.at + v3{ 0.f, 0.f, 0.45f }, c, t);
+					char odds[96];
+					text(s.at + v3{ 0.f, 0.f, 0.3f }, c, sb_monster_odds(odds, sizeof(odds)) + 3);    // (without the " - ")
 				}
 			}
 		}
@@ -2026,14 +2242,16 @@ namespace h2cv::sb
 				why += t1; hard_fail = true;
 			}
 			const bool edge = on_ok && ld.depth < k_sb_depth_sure;
-			const int q = hard_fail ? 0 : (on_ok ? (edge ? 3 : 2) : 1);
-			if (!hard_fail) why += on_ok ? (edge ? "  EDGE (2 in 3: deep on time, but near the limit)" : "  LIKELY (9 in 10: deep even with the contact on time)")
-				: "  LOTTERY (1 in 100: deep only if Havok's contact comes a tick late)";
+			const int q = hard_fail ? 0 : (f.parallel ? 1 : (on_ok ? (edge ? 3 : 2) : 1));   // a thin plate: always a lottery
+			if (!hard_fail && f.parallel) why += "  LOTTERY (a thin plate with parallel sides: launches come from sinking onto its top edges)";
+			else if (!hard_fail) why += on_ok ? (edge ? "  EDGE (2 in 3: deep on time, but near the limit)" : "  LIKELY (9 in 10: deep even with the contact on time)")
+				: "  LOTTERY (about 1 in 30: deep only if Havok's contact comes a tick late)";
 			g_sb_pred.kind = 3; g_sb_pred.q = q; g_sb_pred.speed = speed; g_sb_pred.depth = ld.depth; g_sb_pred.depth_late = ld.depth_late;
 			g_sb_pred.off = -1.f; g_sb_pred.tilt = f.dev; g_sb_pred.at = ld.at;
 			g_sb_pred.launch_lo = g_sb_pred.launch_hi = f.room < 3.f ? 0.f : f.est * g_sb_tick_scale;
 			g_sb_pred.late_start = ld.have_depth ? ld.h_last - ld.step : 1.f; g_sb_pred.debounce = 0; g_sb_pred.feature = fi;
-			line(f.a, f.b, IM_COL32(255, 140, 0, 240), 5.f);
+			// orange is the monster colour: a thin plate's top is drawn pale and thin
+			line(f.a, f.b, f.parallel ? IM_COL32(255, 235, 140, 190) : IM_COL32(255, 140, 0, 240), f.parallel ? 2.f : 5.f);
 			for (int i = 0; i < 16; ++i)
 			{
 				const float a0 = 6.2831853f * (float)i / 16.f, a1 = 6.2831853f * (float)(i + 1) / 16.f;
@@ -2041,7 +2259,8 @@ namespace h2cv::sb
 			}
 			if (!hard_fail && on_ok) sb_dir_arrow(ld.at, f.dir, f.room < 3.f ? 0.f : f.est * g_sb_tick_scale, sb_quality_color(q));
 			char tx[260];
-			snprintf(tx, sizeof(tx), "%s %.2f thick, sides %.1f deg, %.2f u/s, depth %.2f (late %.2f)%s%s", (f.est >= k_sb_dreadnought && f.room >= 3.f) ? "DREADNOUGHT FIN" : "FIN",
+			if (!f.parallel) { char wb[160]; why += sb_monster_window(speed, wb, sizeof(wb)); }
+			snprintf(tx, sizeof(tx), "%s %.2f thick, sides %.1f deg, %.2f u/s, depth %.2f (late %.2f)%s%s", f.parallel ? "THIN PLATE" : ((f.est >= k_sb_dreadnought && f.room >= 3.f) ? "DREADNOUGHT FIN" : "FIN"),
 				0.5f * (f.tmin + f.tmax), f.dev, speed, ld.depth, ld.depth_late, why.c_str(),
 				f.room < 3.f ? "  LOTTERY (little room above: only a slow landing that sinks in late launches here)" : "");
 			if (g_settings.superbounce_seam_text) text(ld.at + v3{ 0.f, 0.f, 0.25f }, sb_quality_color(q), tx);
@@ -2157,11 +2376,16 @@ namespace h2cv::sb
 				// a charged landing (falling, then stopped or launched): counted on a remembered spot; a monster-size launch
 				// (20+ u/s) makes one where there is none
 				if (charged && g_sbl.prev_vz < -1.5f && dvz > 1.5f && tick == g_sbl.prev_tick + 1)
+				{
 					sb_spots_impact(g_sbl.prev_feet, vel, len(vel) >= k_sb_monster * g_sb_tick_scale && (vel.z > 4.f || len(dvh) > 4.f));
+					// a pure-lottery seam landing: did it launch? (ghost seams)
+					if (g_sb_last_air.kind == 1 && g_sb_last_air.lottery && g_sb_last_air.feature >= 0) sb_ghost_impact(g_sb_last_air.feature, vel.z >= 6.f);
+				}
 				// the chain ends when you land (3 ticks on the ground - a bounce touches down for one) or revert
 				if (tick < g_sbl.prev_tick) g_sb_streak = 0;
 				if (airborne) g_sb_ground_n = 0;
 				else if (++g_sb_ground_n >= 3) g_sb_streak = 0;
+				if (airborne && vel.z < -1.5f) g_sb_last_air = g_sb_pred;            // what this fall is rated as, before it lands
 				g_sbl.was_airborne = airborne; g_sbl.prev_vz = vel.z; g_sbl.prev_tick = tick; g_sbl.prev_feet = feet;
 			}
 
@@ -2207,9 +2431,30 @@ namespace h2cv::sb
 					if (g_settings.superbounce_seam_text) text(mid + v3{ 0.f, 0.f, 0.6f }, IM_COL32(255, 80, 40, 255), g_sb_loaded_text);
 				}
 			}
-			sb_draw_spots(feet);
+			if (g_settings.superbounce_spots) sb_draw_spots(feet);
 			if (g_settings.superbounce_gaps)
 			{
+				// junctions (a piece meeting the floor at an angle) within 60 wu, in cyan, the nearest 6 labelled
+				std::vector<std::pair<float, uint32>> near_j;
+				for (uint32 ji : g_sbb.junctions)
+				{
+					const s_sb_seam& sm = g_sbb.seams[(size_t)ji];
+					const v3 c = (sm.a + sm.b) * 0.5f;
+					const float d2 = (c.x - feet.x) * (c.x - feet.x) + (c.y - feet.y) * (c.y - feet.y);
+					if (d2 < 60.f * 60.f) near_j.push_back({ d2, ji });
+				}
+				std::sort(near_j.begin(), near_j.end());
+				for (size_t k = 0; k < near_j.size(); ++k)
+				{
+					const s_sb_seam& sm = g_sbb.seams[(size_t)near_j[k].second];
+					line(sm.a, sm.b, IM_COL32(80, 220, 255, 230), 3.f);
+					if (k < 6 && g_settings.superbounce_seam_text)
+					{
+						char tj[200], od[96];
+						snprintf(tj, sizeof(tj), "JUNCTION %.0f deg (a piece meeting the floor) - LOTTERY, big launches happen here, rarely%s", sm.bend, sb_monster_odds(od, sizeof(od)));
+						text((sm.a + sm.b) * 0.5f + v3{ 0.f, 0.f, 0.3f }, IM_COL32(80, 220, 255, 230), tj);
+					}
+				}
 				// every possible monster gap within 60 wu: magenta, the six nearest labelled with their width
 				std::vector<std::pair<float, size_t>> near_gaps;
 				for (size_t gi = 0; gi < g_sbb.gaps.size(); ++gi)
@@ -2227,9 +2472,9 @@ namespace h2cv::sb
 					line(c, c + v3{ 0.f, 0.f, 0.4f }, IM_COL32(255, 60, 255, 230), 2.f);
 					if (k < 6)
 					{
-						char t[160];
-						if (gp.room < 3.f) snprintf(t, sizeof(t), "MONSTER GAP %.2f wide, room %.1f wu - LOTTERY (little room above)", gp.wmin, gp.room);
-						else snprintf(t, sizeof(t), "MONSTER GAP %.2f wide", gp.wmin);
+						char t[300], odds[96];
+						if (gp.room < 3.f) snprintf(t, sizeof(t), "MONSTER GAP %.2f wide, room %.1f wu - LOTTERY (little room above)%s", gp.wmin, gp.room, sb_monster_odds(odds, sizeof(odds)));
+						else snprintf(t, sizeof(t), "MONSTER GAP %.2f wide%s", gp.wmin, sb_monster_odds(odds, sizeof(odds)));
 						text(c + v3{ 0.f, 0.f, 0.5f }, IM_COL32(255, 120, 255, 255), t);
 					}
 				}
@@ -2245,6 +2490,7 @@ namespace h2cv::sb
 				for (size_t k = 0; k < near_fins.size(); ++k)
 				{
 					const s_sb_fin& fn = g_sbb.fins[near_fins[k].second];
+					if (fn.parallel) continue;                          // thin plates: not monster spots (no 20+ in 120+ landings)
 					const v3 c = (fn.a + fn.b) * 0.5f;
 					line(fn.a, fn.b, IM_COL32(255, 140, 0, 230), 4.f);
 					sb_dir_arrow(c, fn.dir, fn.room < 3.f ? 0.f : fn.est * g_sb_tick_scale, IM_COL32(255, 140, 0, 230));
@@ -2254,15 +2500,19 @@ namespace h2cv::sb
 						// (the room above it) decides how often that happens
 						float vmax = 0.f, chance = 0.f;
 						sb_room_speed(fn.room, tps, vmax, chance);
-						char room_txt[24], t[200];
+						char room_txt[24], t[360];
 						if (fn.room >= 79.f) snprintf(room_txt, sizeof(room_txt), "80+");
 						else snprintf(room_txt, sizeof(room_txt), "%.0f", fn.room);
-						if (fn.room < 3.f)
+						if (fn.parallel)
+							snprintf(t, sizeof(t), "THIN PLATE %.2f thick, parallel sides%s - LOTTERY: launches come from sinking onto its top edges",
+								0.5f * (fn.tmin + fn.tmax), fn.room < 3.f ? ", little room above" : "");
+						else if (fn.room < 3.f)
 							snprintf(t, sizeof(t), "FIN %.2f thick, sides %.1f deg, room %.1f wu - LOTTERY (little room above: only a slow landing that sinks in late launches here)",
 								0.5f * (fn.tmin + fn.tmax), fn.dev, fn.room);
 						else
 							snprintf(t, sizeof(t), "%s %.2f thick, sides %.1f deg, room %s wu: arrive up to %.0f u/s, sinks in on time %.0f%%%s", fn.est >= k_sb_dreadnought ? "DREADNOUGHT FIN" : "FIN",
 								0.5f * (fn.tmin + fn.tmax), fn.dev, room_txt, vmax, 100.f * chance, chance < 0.15f ? " - too little room to sink in" : "");
+						if (!fn.parallel) { char odds[96]; const size_t tl = strlen(t); snprintf(t + tl, sizeof(t) - tl, "%s", sb_monster_odds(odds, sizeof(odds))); }   // after the whole if / else chain
 						text(c + v3{ 0.f, 0.f, 0.5f }, chance < 0.15f ? IM_COL32(255, 110, 90, 255) : IM_COL32(255, 170, 60, 255), t);
 					}
 				}
@@ -2294,7 +2544,14 @@ namespace h2cv::sb
 				if (hit && s_path.path.size() > 1) { g_sb_air_tick = tick; g_sb_air_at = s_path.at; g_sb_air_t = (float)(s_path.path.size() - 1) * dt; }
 				g_sb_pred = s_sb_pred{};
 				int gap_i = -1; v3 gap_at{}, gap_v{}; float gap_off = 0.f;
-				const int fin_i = hit ? sb_fin_under(path) : -1;
+				int fin_i = hit ? sb_fin_under(path) : -1;
+				// a thin plate rates a landing only where no seam does: landing within 0.15 of a seam, that seam's own verdict and
+				// launch estimate come first (as before plates were found) - the plate explains launches where there is no seam
+				if (fin_i >= 0 && g_sbb.fins[(size_t)fin_i].parallel)
+				{
+					v3 psa{}, psb{}; float poff = 1e9f, pbend = 0.f;
+					if (sb_nearest_seam(path.surface, path.at, psa, psb, poff, pbend) && poff <= 0.15f) fin_i = -1;
+				}
 				if (sb_gap_crossing(path, gap_i, gap_at, gap_v, gap_off)) sb_draw_gap_landing(path, gap_i, gap_at, gap_v, gap_off, charged, vsweep);
 				else if (fin_i >= 0) sb_draw_fin_landing(path, fin_i, charged);
 				else if (hit) sb_draw_landing(path, charged, vsweep);
@@ -2434,6 +2691,10 @@ namespace h2cv::sb
 					r.down = down;
 					// a debounce: the late contact a LOTTERY needs would start too deep - you fall through instead
 					if (g_settings.superbounce_debounce && r.q == 1 && !sm.gap && r.late_start <= -k_sb_debounce) { r.q = 0; r.debounce = true; }
+					// a ghost seam (its lottery landings have launched): amber, with what it did
+					if (r.q == 1 && !sm.gap) { int gt = 0, gh = 0; if (sb_ghost_get((int)si, gt, gh)) { r.q = 3; r.ghost_tries = gt; r.ghost_hits = gh; } }
+					// a junction (a piece meeting the floor at an angle): big launches happen here, rarely - a lottery whatever the depth says
+					if (sm.junction) { r.q = 1; r.debounce = false; r.junction = true; r.jdeg = sm.bend; }
 					// a seam's launch is the tilt line; a gap's grows with the arrival speed (sb_gap_range)
 					r.best_launch = down <= 0.f ? 0.f : sb_up_estimate(std::atan(k_sb_best_tilt)) * g_sb_tick_scale;
 					r.best_hi = r.best_launch;
@@ -2527,18 +2788,23 @@ namespace h2cv::sb
 				else if (r.air)
 				{
 					if (r.carried) snprintf(t, sizeof(t), "%sfalling: arrive %.2f u/s (rated at take-off)", pre, r.walk);
-					else if (r.q == 2) snprintf(t, sizeof(t), "%sfalling: arrive %.2f u/s, depth %.2f - %s -> about %.0f u/s up%s", pre, r.walk, r.depth_walk, r.depth_walk < k_sb_depth_sure ? "EDGE (2 in 3)" : "LIKELY (9 in 10)", r.best_launch,
+					else if (r.q == 2) snprintf(t, sizeof(t), "%sfalling: arrive %.2f u/s, depth %.2f - %s -> about %.0f u/s up%s", pre, r.walk, r.depth_walk, r.depth_walk < k_sb_depth_sure ? "EDGE (about 1 in 2)" : "LIKELY (9 in 10)", r.best_launch,
 						(g_settings.superbounce_debounce && r.late_start <= -k_sb_debounce) ? " - DEBOUNCE if the contact is late" : "");
-					else if (r.q == 1) snprintf(t, sizeof(t), "%sfalling: arrive %.2f u/s, LOTTERY (1 in 100): deep only if Havok's contact comes a tick late", pre, r.walk);
+					else if (r.junction) { char od[96]; snprintf(t, sizeof(t), "%sfalling: arrive %.2f u/s - JUNCTION %.0f deg (a piece meeting the floor): LOTTERY, big launches happen here, rarely%s", pre, r.walk, r.jdeg, sb_monster_odds(od, sizeof(od))); }
+					else if (r.q == 3 && r.ghost_tries > 0) snprintf(t, sizeof(t), "%sfalling: arrive %.2f u/s - GHOST SEAM: %d of %d lottery landings here launched (its contact comes late)", pre, r.walk, r.ghost_hits, r.ghost_tries);
+					else if (r.q == 1) snprintf(t, sizeof(t), "%sfalling: arrive %.2f u/s, LOTTERY (about 1 in 30): deep only if Havok's contact comes a tick late", pre, r.walk);
 					else if (r.debounce) snprintf(t, sizeof(t), "%sfalling: DEBOUNCE - the late contact this needs starts %.2f below the floor: you fall through", pre, -r.late_start);
 					else if (r.braked) snprintf(t, sizeof(t), "%sfalling: BRAKED - a fall of %.0f+ u/s is caught a tick before impact and set down at %.0f u/s", pre, k_sb_brake_speed * g_sb_tick_scale, k_sb_brake_to);
 					else if (r.walk < r.need) snprintf(t, sizeof(t), "%sfalling: arrive %.2f u/s - too slow (< %.2f)", pre, r.walk, r.need);
 					else snprintf(t, sizeof(t), "%sfalling: arrive %.2f u/s - too shallow (%.2f, late %.2f)", pre, r.walk, r.depth_walk, r.late_walk);
 				}
-				else if (r.q == 2) snprintf(t, sizeof(t), "%sdrop %.1f: %s %s (%.2f u/s, depth %.2f) -> about %.0f u/s up%s%s", pre, r.drop, opt, dep < k_sb_depth_sure ? "EDGE (2 in 3)" : "LIKELY (9 in 10)", spd, dep, r.best_launch, blocked,
+				else if (r.q == 2) snprintf(t, sizeof(t), "%sdrop %.1f: %s %s (%.2f u/s, depth %.2f) -> about %.0f u/s up%s%s", pre, r.drop, opt, dep < k_sb_depth_sure ? "EDGE (about 1 in 2)" : "LIKELY (9 in 10)", spd, dep, r.best_launch, blocked,
 					(g_settings.superbounce_debounce && r.late_start <= -k_sb_debounce) ? " - DEBOUNCE if the contact is late" : "");
+				else if (r.junction) { char od[96]; snprintf(t, sizeof(t), "%sdrop %.1f: JUNCTION %.0f deg (a piece meeting the floor) - LOTTERY, big launches happen here, rarely; %s %.2f u/s%s", pre, r.drop, r.jdeg, opt, spd, sb_monster_odds(od, sizeof(od))); }
+				else if (r.q == 3 && r.ghost_tries > 0)
+					snprintf(t, sizeof(t), "%sdrop %.1f: GHOST SEAM: %d of %d lottery landings here launched - %s %.2f u/s (its contact comes late)%s", pre, r.drop, r.ghost_hits, r.ghost_tries, opt, spd, blocked);
 				else if (r.q == 1)
-					snprintf(t, sizeof(t), "%sdrop %.1f: LOTTERY (1 in 100), %s %.2f u/s: deep only if Havok's contact comes a tick late%s", pre, r.drop, opt, spd, blocked);
+					snprintf(t, sizeof(t), "%sdrop %.1f: LOTTERY (about 1 in 30), %s %.2f u/s: deep only if Havok's contact comes a tick late%s", pre, r.drop, opt, spd, blocked);
 				else if (r.debounce) snprintf(t, sizeof(t), "%sdrop %.1f: DEBOUNCE - the late contact this needs starts %.2f below the floor: you fall through", pre, r.drop, -r.late_start);
 				else if (r.braked) snprintf(t, sizeof(t), "%sdrop %.1f: BRAKED - a fall of %.0f+ u/s is caught a tick before impact and set down at %.0f u/s", pre, r.drop, k_sb_brake_speed * g_sb_tick_scale, k_sb_brake_to);
 				else if ((std::max)(r.walk, r.jump) < r.need) snprintf(t, sizeof(t), "%sdrop %.1f: too slow (walk %.2f, jump %.2f < %.2f)", pre, r.drop, r.walk, r.jump, r.need);
@@ -2661,6 +2927,7 @@ namespace h2cv::sb
 		g_settings.superbounce_gaps = opt.highlight;
 		g_settings.superbounce_seam_text = opt.seamText;
 		g_settings.superbounce_debounce = opt.debounce;
+		g_settings.superbounce_spots = opt.spots;
 		g_sb_panel.clear();
 		g_sb_hud = -1; g_sb_speed_now = -1.f;
 		g_sbs = s_sb_state{};

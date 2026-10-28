@@ -67,7 +67,7 @@ namespace h2cv
 		// superbounce viewer (Halo 2): where you will land and what that launches; sbSeamText off = only the colours and the
 		// launch arrows' speed / height; sbRecord = superbounce_log.csv; sbHighlight = possible monster bounces (WIP);
 		// sbKeepCharge = a crouch charge survives reverts
-		std::atomic_bool superbounce{ false }, sbSeamText{ true }, sbSpeed{ true }, sbDebounce{ true }, sbRecord{ false }, sbHighlight{ false }, sbKeepCharge{ false };
+		std::atomic_bool superbounce{ false }, sbSeamText{ true }, sbSpeed{ true }, sbDebounce{ true }, sbSpots{ true }, sbRecord{ false }, sbHighlight{ false }, sbKeepCharge{ false };
 		std::atomic_bool sbForceCharge{ false };       // Force Charged state: the pair with the level held at -3
 		std::atomic_bool infoSuperbounce{ true };       // its Info panel section
 		std::atomic_bool collision{ true };              // the Collision Viewer itself (off: only the info panel / bars run)

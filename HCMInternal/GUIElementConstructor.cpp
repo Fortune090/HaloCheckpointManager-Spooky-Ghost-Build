@@ -1350,7 +1350,7 @@ private:
 
 				case GUIElementEnum::collisionViewerSuperbounceGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
-						(game, ToolTipCollection("Halo 2: where you will land and what that landing launches. The seams below you are coloured by how likely a launch is - LIKELY (green, about 9 in 10), EDGE (orange, about 2 in 3), LOTTERY (about 1 in 100, it needs Havok's contact a tick late) - with your best drift across them; your path, the landing circle with its verdict, and the launch arrow with its speed and height. Monster gaps and dreadnought fins below you are marked and predicted too. The HUD shows only CHARGED / not charged (bottom middle); the rest goes in the Info panel's superbounce section. Reads only (Maintain charge state on reverts writes). Works without the Collision Viewer. While you touch the level, your live contact pairs are drawn with their kick factor, and each launch is classified (squeeze pair, corner, twin points) with how deep the contacts were."), std::nullopt, "Superbounce viewer", settings->collisionViewerSuperbounce));
+						(game, ToolTipCollection("Halo 2: where you will land and what that landing launches. The seams below you are coloured by how likely a launch is - LIKELY (green, about 9 in 10), EDGE (orange, about 1 in 2 to 2 in 3), LOTTERY (yellow, about 1 in 30: it needs Havok's contact a tick late), GHOST SEAM (orange: a lottery seam whose late contact has launched you 2+ times, remembered per level) - with your best drift across them (8-13 deg across is an edge, 13+ slides you off); your path, the landing circle with its verdict, and the launch arrow with its speed and height. Monster gaps and dreadnought fins below you are marked and predicted too. The HUD shows only CHARGED / not charged (bottom middle); the rest goes in the Info panel's superbounce section. Reads only (Maintain charge state on reverts writes). Works without the Collision Viewer. While you touch the level, your live contact pairs are drawn with their kick factor, and each launch is classified (squeeze pair, corner, twin points) with how deep the contacts were."), std::nullopt, "Superbounce viewer", settings->collisionViewerSuperbounce));
 
 				case GUIElementEnum::collisionViewerSuperbounceSeamTextGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
@@ -1364,6 +1364,11 @@ private:
 				case GUIElementEnum::collisionViewerSuperbounceDebounceGUI:
 					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
 						(game, ToolTipCollection("Flags landings and seams where a late contact would start so far below the floor (0.19+) that the pill falls through instead of launching - a debounce. A LOTTERY that needs that late contact turns red; a LIKELY / EDGE landing notes the risk."), std::nullopt, "Debounce predictor", settings->collisionViewerSuperbounceDebounce
+						));
+
+				case GUIElementEnum::collisionViewerSuperbounceSpotsGUI:
+					return std::optional<std::shared_ptr<IGUIElement>>(std::make_shared<GUISimpleToggle<false>>
+						(game, ToolTipCollection("Rings, arrows and labels at places a landing launched you 20+ u/s (35+: a dreadnought), with how often they launched and the arrival speeds that give the best odds. Hidden, they are still recorded."), std::nullopt, "Remembered monster / dreadnought spots", settings->collisionViewerSuperbounceSpots
 						));
 
 				case GUIElementEnum::collisionViewerSuperbounceRecordGUI:
@@ -1393,6 +1398,7 @@ private:
 							createNestedElement(GUIElementEnum::collisionViewerSuperbounceSeamTextGUI),
 							createNestedElement(GUIElementEnum::collisionViewerSuperbounceSpeedGUI),
 							createNestedElement(GUIElementEnum::collisionViewerSuperbounceDebounceGUI),
+							createNestedElement(GUIElementEnum::collisionViewerSuperbounceSpotsGUI),
 							createNestedElement(GUIElementEnum::collisionViewerSuperbounceRecordGUI),
 							createNestedElement(GUIElementEnum::collisionViewerSuperbounceHighlightGUI),
 							createNestedElement(GUIElementEnum::collisionViewerSuperbounceKeepChargeGUI),
